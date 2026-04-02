@@ -5,6 +5,7 @@ channels:
 dependencies:
   - xdem
   - numba
+  - tqdm
 
   # Often specified in .condarc, but we want to make sure it's included here
   - ipykernel
