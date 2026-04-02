@@ -4,6 +4,7 @@ channels:
   - defaults
 dependencies:
   - xdem
+  - numba
 
   # Often specified in .condarc, but we want to make sure it's included here
   - ipykernel
