@@ -1,2 +1,2 @@
 # CNTP
-A repo that helps in generating and processing point cloud over a given timeline from the timelapse photogrammetry
+A library for generating and processing point clouds from the timelapse photogrammetry.
