@@ -1,0 +1,17 @@
+name: cntp
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - xdem
+
+  # Often specified in .condarc, but we want to make sure it's included here
+  - ipykernel
+  - jupyter
+  - nb_conda_kernels
+  - htop
+  - tree
+
+  - pip
+  - pip:
+    - py4dgeo
