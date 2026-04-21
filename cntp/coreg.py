@@ -1,6 +1,11 @@
 import numpy as np
+import py4dgeo
 from scipy.interpolate import griddata
 from scipy.spatial import cKDTree
+
+# NDWI vs intensity separation line constants
+_NDWI_A = -150 / 0.25   # slope
+_NDWI_B = 150            # intercept
 
 def downsample_point_cloud(points, downsample_factor):
     """
@@ -125,6 +130,138 @@ def calculate_aspect_slope(normal):
     slope = np.arctan(np.sqrt(normal_x**2 + normal_y**2) / normal_z) * 180 / np.pi
 
     return aspect, slope
+
+def extract_stable_terrain(cloud: np.ndarray, slope_threshold: float = 60) -> tuple:
+    """Extract stable terrain points from a point cloud using slope and NDWI filters.
+
+    Parameters
+    ----------
+    cloud : np.ndarray
+        Nx9 array (X, Y, Z, R, G, B, NX, NY, NZ) with RGB in 0-255.
+    slope_threshold : float
+        Minimum slope angle in degrees to consider a point geometrically stable.
+        Default is 60°.
+
+    Returns
+    -------
+    stable_slope : np.ndarray
+        Points passing the slope filter only (used for geometry plot and NDWI scatter).
+    stable_final : np.ndarray
+        Points passing both slope and NDWI filters (used for RGB plot and ICP).
+    """
+    _, slope = calculate_aspect_slope(cloud[:, 6:])
+    stable_slope = cloud[slope > slope_threshold]
+
+    grayscale = np.mean(stable_slope[:, 3:6], axis=1)
+    ndwi = (stable_slope[:, 5] - stable_slope[:, 3]) / (stable_slope[:, 3] + stable_slope[:, 5])
+    mask = grayscale - (ndwi * _NDWI_A + _NDWI_B) < 0
+    stable_final = stable_slope[mask]
+
+    return stable_slope, stable_final
+
+
+def run_m3c2(epoch_ref: py4dgeo.Epoch, epoch_tba: py4dgeo.Epoch,
+             normal_radii: float = 2.5, cyl_radius: float = 2.5,
+             max_distance: float = 30, corepoints_stride: int = 10) -> tuple:
+    """Run M3C2 distance computation between two epochs.
+
+    Parameters
+    ----------
+    epoch_ref : py4dgeo.Epoch
+        Reference epoch.
+    epoch_tba : py4dgeo.Epoch
+        To-be-aligned epoch.
+    normal_radii : float
+        Radius for normal estimation (default 2.5).
+    cyl_radius : float
+        Cylinder radius for distance computation (default 2.5).
+    max_distance : float
+        Maximum search distance (default 30).
+    corepoints_stride : int
+        Use every nth point of epoch_ref as a corepoint (default 10).
+
+    Returns
+    -------
+    median : float
+        Median M3C2 distance.
+    std : float
+        Standard deviation of M3C2 distances.
+    """
+    m3c2 = py4dgeo.M3C2(
+        epochs=(epoch_ref, epoch_tba),
+        corepoints=epoch_ref.cloud[::corepoints_stride],
+        normal_radii=[normal_radii],
+        cyl_radius=cyl_radius,
+        max_distance=max_distance,
+    )
+    distances, _ = m3c2.run()
+    return float(np.nanmedian(distances)), float(np.nanstd(distances))
+
+
+def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
+             tba_data: np.ndarray,
+             cam_coordinates: np.ndarray = None) -> dict:
+    """Co-register a single TBA point cloud to the reference using ICP.
+
+    Parameters
+    ----------
+    epoch_stable_ref : py4dgeo.Epoch
+        Pre-built epoch of the reference stable terrain (used for ICP and M3C2).
+    tba_data : np.ndarray
+        Nx9 array (X, Y, Z, R, G, B, NX, NY, NZ) of the TBA cloud.
+    cam_coordinates : np.ndarray
+        Camera origin used as the ICP reduction point (default: [0, 0, 0]).
+
+    Returns
+    -------
+    dict with keys:
+        cloud_coreg  : Nx9 array — co-registered point cloud
+        trafo        : py4dgeo transformation object
+        stable_slope : points after slope filter (for geometry + NDWI plot)
+        stable_final : points after slope + NDWI filter (for RGB plot)
+        ndwi         : NDWI values of stable_slope
+        grayscale    : mean RGB intensity of stable_slope
+        med_before   : median M3C2 distance before co-registration
+        std_before   : std M3C2 distance before co-registration
+        med_after    : median M3C2 distance after co-registration
+        std_after    : std M3C2 distance after co-registration
+    """
+    if cam_coordinates is None:
+        cam_coordinates = np.array([0, 0, 0])
+
+    stable_slope, stable_final = extract_stable_terrain(tba_data)
+
+    grayscale = np.mean(stable_slope[:, 3:6], axis=1)
+    ndwi = (stable_slope[:, 5] - stable_slope[:, 3]) / (stable_slope[:, 3] + stable_slope[:, 5])
+
+    epoch_all    = py4dgeo.Epoch(tba_data[:, :3])
+    epoch_stable = py4dgeo.Epoch(stable_final[:, :3])
+
+    med_before, std_before = run_m3c2(epoch_stable_ref, epoch_stable)
+
+    trafo = py4dgeo.iterative_closest_point(
+        epoch_stable_ref, epoch_stable, reduction_point=cam_coordinates
+    )
+    epoch_all.transform(trafo)
+    epoch_stable.transform(trafo)
+
+    med_after, std_after = run_m3c2(epoch_stable_ref, epoch_stable)
+
+    cloud_coreg = np.column_stack((epoch_all.cloud, tba_data[:, 3:6], tba_data[:, 6:]))
+
+    return {
+        "cloud_coreg":  cloud_coreg,
+        "trafo":        trafo,
+        "stable_slope": stable_slope,
+        "stable_final": stable_final,
+        "ndwi":         ndwi,
+        "grayscale":    grayscale,
+        "med_before":   med_before,
+        "std_before":   std_before,
+        "med_after":    med_after,
+        "std_after":    std_after,
+    }
+
 
 def interpolate_and_mask(x, y, z, xi, yi, res, max_gap_pixels):
     # Interpolation (cubic)
