@@ -133,8 +133,8 @@ def coreg_pc(ref_cloud_path: str | Path,
 
         result = _coreg_single(epoch_stable_ref, tba_data, cam_coordinates)
 
-        tqdm.write(f"Before coreg — median: {result['med_before']:.3f} m  std: {result['std_before']:.3f} m")
-        tqdm.write(f"After  coreg — median: {result['med_after']:.3f} m  std: {result['std_after']:.3f} m")
+        tqdm.write(f"Before coreg — median of M3C2 distances STABLE: {result['med_before']:.3f} m  std of M3C2 distances STABLE: {result['std_before']:.3f} m")
+        tqdm.write(f"After  coreg — median of M3C2 distances STABLE: {result['med_after']:.3f} m  std of M3C2 distances STABLE: {result['std_after']:.3f} m")
 
         plot_stable_terrain_diagnostics(
             result["stable_slope"], result["stable_final"],
