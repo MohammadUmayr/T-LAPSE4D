@@ -5,8 +5,8 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 from cntp.coreg import filter_points_inside_box, extract_stable_terrain, coreg_pc as _coreg_single, _NDWI_A, _NDWI_B
-from cntp.io import load_las, save_las, read_las_bounds
-from cntp.plot import plot_stable_terrain_diagnostics
+from cntp.io import load_las, save_las, read_las_bounds, apply_glacier_mask
+from cntp.plot import plot_stable_terrain_diagnostics, plot_m3c2_distances
 
 
 def coreg_pc(ref_cloud_path: str | Path,
@@ -14,8 +14,10 @@ def coreg_pc(ref_cloud_path: str | Path,
                 output_dir: str | Path,
                 min_bound: np.ndarray = None,
                 max_bound: np.ndarray = None,
-                crs_epsg: str = "EPSG:2154",
+                crs_epsg: str = "EPSG:32645",
+                glacier_mask_path: str | Path = None,
                 downsample_factor: float = 0.5,
+                tba_downsample_factor: float = None,
                 cam_coordinates: np.ndarray = None,
                 overwrite: bool = False,
                 overwrite_plots: bool = False,
@@ -49,7 +51,10 @@ def coreg_pc(ref_cloud_path: str | Path,
     crs_epsg : str
         EPSG code for the coordinate reference system (default: "EPSG:2154").
     downsample_factor : float
-        Fraction of points to keep during processing (0 < factor <= 1.0).
+        Fraction of points to keep for the reference cloud (0 < factor <= 1.0).
+    tba_downsample_factor : float, optional
+        Fraction of points to keep for each TBA cloud. Defaults to
+        ``downsample_factor`` when not set.
     cam_coordinates : np.ndarray
         Camera origin used as the ICP reduction point (default: [0, 0, 0]).
     overwrite : bool
@@ -57,13 +62,6 @@ def coreg_pc(ref_cloud_path: str | Path,
     overwrite_plots : bool
         If False (default), skip plots that already exist.
     """
-    if cam_coordinates is None:
-        cam_coordinates = np.array([0, 0, 0])
-
-    if min_bound is None or max_bound is None:
-        min_bound, max_bound = read_las_bounds(ref_cloud_path)
-        print(f"Bounds from reference header: min={min_bound}, max={max_bound}")
-
     output_dir = Path(output_dir)
     dem_dir      = output_dir / "dem_dir"
     PC_dir       = output_dir / "coreg_PC_dir"
@@ -95,8 +93,19 @@ def coreg_pc(ref_cloud_path: str | Path,
     # ------------------------------------------------------------------
     # Load and prepare reference cloud
     # ------------------------------------------------------------------
+    _tba_ds = tba_downsample_factor if tba_downsample_factor is not None else downsample_factor
     ref_cloud = load_las(ref_cloud_path, downsample_factor=downsample_factor)
+
+    if min_bound is None or max_bound is None:
+        min_bound, max_bound = read_las_bounds(ref_cloud_path)
+        print(f"Bounds from reference header: min={min_bound}, max={max_bound}")
+
     ref_cloud = filter_points_inside_box(ref_cloud, min_bound, max_bound)
+    if glacier_mask_path is not None:
+        ref_cloud = apply_glacier_mask(ref_cloud, glacier_mask_path)
+
+    if cam_coordinates is None:
+        cam_coordinates = ref_cloud[:, :3].mean(axis=0)
 
     stable_slope_ref, stable_final_ref = extract_stable_terrain(ref_cloud)
 
@@ -128,8 +137,10 @@ def coreg_pc(ref_cloud_path: str | Path,
 
         tqdm.write(f"Processing {tba_cloud_name}")
 
-        tba_data = load_las(tba_cloud_path, downsample_factor=downsample_factor)
+        tba_data = load_las(tba_cloud_path, downsample_factor=_tba_ds)
         tba_data = filter_points_inside_box(tba_data, min_bound, max_bound)
+        if glacier_mask_path is not None:
+            tba_data = apply_glacier_mask(tba_data, glacier_mask_path)
 
         result = _coreg_single(epoch_stable_ref, tba_data, cam_coordinates)
 
@@ -141,6 +152,12 @@ def coreg_pc(ref_cloud_path: str | Path,
             result["ndwi"], result["grayscale"],
             _NDWI_A, _NDWI_B, tba_plot_dir, title=tba_cloud_name, overwrite=overwrite_plots,
         )
+        _plot_if_missing = overwrite_plots or not (tba_plot_dir / "m3c2_distances.png").exists()
+        if _plot_if_missing:
+            plot_m3c2_distances(
+                result["dist_before"], result["dist_after"],
+                tba_plot_dir, title=tba_cloud_name,
+            )
 
         stats_rows.append([tba_cloud_name,
                            result["med_before"], result["std_before"],

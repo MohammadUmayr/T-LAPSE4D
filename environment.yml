@@ -15,7 +15,12 @@ dependencies:
   - tree
 
   - laspy
+  - openpyxl
+  - opencv
 
   - pip
   - pip:
     - py4dgeo
+    # Metashape Python module (proprietary, not on PyPI)
+    # Download Linux wheel from: agisoft.com → Downloads → Metashape Python 3 Module
+    # Install manually: pip install metashape-2.3.1-...-linux_x86_64.whl

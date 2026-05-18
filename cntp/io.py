@@ -3,6 +3,8 @@ import numpy as np
 from scipy.spatial import cKDTree
 import laspy
 from pathlib import Path
+import geopandas as gpd
+import shapely
 
 
 def read_las_bounds(path: str | Path) -> tuple:
@@ -76,6 +78,11 @@ def save_las(data: np.ndarray, path: str | Path) -> None:
     """
     path = Path(path)
     header = laspy.LasHeader(point_format=2, version="1.2")
+    # Derive scale so stored integers give ~0.1 mm precision in the cloud's
+    # native units (works for both metric and geographic-degree coordinates).
+    xyz_range = data[:, :3].max(axis=0) - data[:, :3].min(axis=0)
+    header.scales  = np.maximum(xyz_range / 1_000_000, 1e-9)
+    header.offsets = data[:, :3].min(axis=0)
     header.add_extra_dims([
         laspy.ExtraBytesParams(name="normal x", type=np.float32),
         laspy.ExtraBytesParams(name="normal y", type=np.float32),
@@ -92,6 +99,28 @@ def save_las(data: np.ndarray, path: str | Path) -> None:
     las['normal y'] = data[:, 7].astype(np.float32)
     las['normal z'] = data[:, 8].astype(np.float32)
     las.write(str(path))
+
+
+
+def apply_glacier_mask(cloud: np.ndarray, mask_path: str | Path) -> np.ndarray:
+    """Remove points that fall inside the glacier polygon.
+
+    Parameters
+    ----------
+    cloud : np.ndarray
+        Nx9 array (X, Y, Z, ...). XY must be in the same CRS as the shapefile.
+    mask_path : str | Path
+        Path to a shapefile containing the glacier polygon(s).
+
+    Returns
+    -------
+    np.ndarray
+        Cloud with glacier points removed.
+    """
+    gdf = gpd.read_file(Path(mask_path))
+    glacier_geom = gdf.geometry.union_all()
+    inside = shapely.contains_xy(glacier_geom, cloud[:, 0], cloud[:, 1])
+    return cloud[~inside]
 
 
 def save_dem(array, filename, crs_epsg, transform):

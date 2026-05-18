@@ -162,7 +162,7 @@ def extract_stable_terrain(cloud: np.ndarray, slope_threshold: float = 60) -> tu
 
 def run_m3c2(epoch_ref: py4dgeo.Epoch, epoch_tba: py4dgeo.Epoch,
              normal_radii: float = 2.5, cyl_radius: float = 2.5,
-             max_distance: float = 30, corepoints_stride: int = 10) -> tuple:
+             max_distance: float = 30) -> tuple:
     """Run M3C2 distance computation between two epochs.
 
     Parameters
@@ -177,8 +177,6 @@ def run_m3c2(epoch_ref: py4dgeo.Epoch, epoch_tba: py4dgeo.Epoch,
         Cylinder radius for distance computation (default 2.5).
     max_distance : float
         Maximum search distance (default 30).
-    corepoints_stride : int
-        Use every nth point of epoch_ref as a corepoint (default 10).
 
     Returns
     -------
@@ -189,13 +187,13 @@ def run_m3c2(epoch_ref: py4dgeo.Epoch, epoch_tba: py4dgeo.Epoch,
     """
     m3c2 = py4dgeo.M3C2(
         epochs=(epoch_ref, epoch_tba),
-        corepoints=epoch_ref.cloud[::corepoints_stride],
-        normal_radii=[normal_radii],
+        corepoints=epoch_ref.cloud[:],
+        normal_radii=(normal_radii,),
         cyl_radius=cyl_radius,
         max_distance=max_distance,
     )
     distances, _ = m3c2.run()
-    return float(np.nanmedian(distances)), float(np.nanstd(distances))
+    return float(np.nanmedian(distances)), float(np.nanstd(distances)), distances
 
 
 def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
@@ -226,40 +224,50 @@ def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
         med_after    : median M3C2 distance after co-registration
         std_after    : std M3C2 distance after co-registration
     """
-    if cam_coordinates is None:
-        cam_coordinates = np.array([0, 0, 0])
-
     stable_slope, stable_final = extract_stable_terrain(tba_data)
 
     grayscale = np.mean(stable_slope[:, 3:6], axis=1)
     ndwi = (stable_slope[:, 5] - stable_slope[:, 3]) / (stable_slope[:, 3] + stable_slope[:, 5])
 
+    if cam_coordinates is None:
+        cam_coordinates = tba_data[:, :3].mean(axis=0)
+
     epoch_all    = py4dgeo.Epoch(tba_data[:, :3])
     epoch_stable = py4dgeo.Epoch(stable_final[:, :3])
 
-    med_before, std_before = run_m3c2(epoch_stable_ref, epoch_stable)
+    ref_centroid = epoch_stable_ref.cloud.mean(axis=0)
+    tba_centroid = stable_final[:, :3].mean(axis=0)
+    print(f"  Stable terrain — ref: {len(epoch_stable_ref.cloud)} pts | tba: {len(stable_final)} pts")
+    print(f"  Ref centroid:  {ref_centroid}")
+    print(f"  TBA centroid:  {tba_centroid}")
+    print(f"  Centroid diff: {tba_centroid - ref_centroid}")
+
+    med_before, std_before, dist_before = run_m3c2(epoch_stable_ref, epoch_stable)
 
     trafo = py4dgeo.iterative_closest_point(
-        epoch_stable_ref, epoch_stable, reduction_point=cam_coordinates
+        py4dgeo.Epoch(epoch_stable_ref.cloud.copy()), epoch_stable,
+        reduction_point=cam_coordinates
     )
     epoch_all.transform(trafo)
     epoch_stable.transform(trafo)
 
-    med_after, std_after = run_m3c2(epoch_stable_ref, epoch_stable)
+    med_after, std_after, dist_after = run_m3c2(epoch_stable_ref, epoch_stable)
 
     cloud_coreg = np.column_stack((epoch_all.cloud, tba_data[:, 3:6], tba_data[:, 6:]))
 
     return {
-        "cloud_coreg":  cloud_coreg,
-        "trafo":        trafo,
-        "stable_slope": stable_slope,
-        "stable_final": stable_final,
-        "ndwi":         ndwi,
-        "grayscale":    grayscale,
-        "med_before":   med_before,
-        "std_before":   std_before,
-        "med_after":    med_after,
-        "std_after":    std_after,
+        "cloud_coreg":   cloud_coreg,
+        "trafo":         trafo,
+        "stable_slope":  stable_slope,
+        "stable_final":  stable_final,
+        "ndwi":          ndwi,
+        "grayscale":     grayscale,
+        "med_before":    med_before,
+        "std_before":    std_before,
+        "med_after":     med_after,
+        "std_after":     std_after,
+        "dist_before":   dist_before,
+        "dist_after":    dist_after,
     }
 
 
