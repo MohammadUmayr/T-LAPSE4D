@@ -4,6 +4,146 @@ Each entry records what was added or changed, where, and exactly what to remove 
 
 ---
 
+## 2026-05-19 — Runtime / disk optimisations (round 1)
+
+### Goal
+Cut per-day disk usage and avoid recomputing artefacts that depend only on
+the reference cloud, not on which day is being processed.
+
+### Changes
+1. **Shared reference cache.** Downsampled reference (`<stem>_ds{f}.las`) and
+   stable reference (`<stem>_ds{f}_stable.las`) now live under
+   `output_new/_ref_cache/`, not under each day's `coreg/downsampled/` and
+   `coreg/stable_ref/`. They depend only on (ref_cloud, ref_downsample,
+   glacier_mask), so day 2..N reuse what day 1 created.
+   - `cntp/pipeline_4dsfm.py`: new `ref_cache_dir = output_dir / "output_new" / "_ref_cache"`.
+   - `pc_align_p2p_sp2p` now receives `ref_las = ref_ds_path` and
+     `ref_downsample_factor = 1.0` so it doesn't make a per-day duplicate.
+
+2. **Single-day BA exports `.las`, not `.laz`.** `run_single_day_fixed_iop`
+   in `cntp/metashape.py` was changed: it used to write `{date}_cloud.laz`,
+   then the coreg step decompressed it into `coreg/downsampled/{date}_cloud_full.las`.
+   Now the single-day output is `{date}_cloud.las` directly and the
+   downsampled-TBA-cache step in `pc_align_p2p_sp2p` is **skipped entirely**
+   when `tba_downsample_factor=1.0`. Saves ~250 MB of duplicate cloud per
+   day; ASP reads the single-day `.las` directly (no decompression).
+   - The pipeline orchestrator's `tba_las_path` (formerly `laz_path`) now
+     points at the `.las`. Result-dict key renamed accordingly.
+
+3. **Drop `slope.las` from `extract_stable_reference`.** Previously saved
+   both `<stem>_stable.las` and `<stem>_slope.las`. Now only the stable
+   cloud is saved. The pre-NDWI-filter cloud is consumed in-memory to
+   render the reference NDWI + RGB diagnostic plots (under
+   `_ref_cache/m3c2_plots/reference/`) before being discarded. Function
+   signature changed from `tuple[Path, Path]` to `Path`.
+   - Also added a fast-path: if both `_stable.las` and the requested PNGs
+     already exist, skip the load + KDTree pass.
+   - `evaluate_coreg`: removed the now-redundant `ref_slope_las` parameter
+     and the reference plotting branch (reference plots are produced once,
+     up-front, by `extract_stable_reference`). TBA NDWI + RGB plots still
+     run per-day under `coreg/m3c2_plots/tba/`.
+
+4. **Drop the 3D `stable_terrain_geometry.png` plot.** `plot_stable_terrain_diagnostics`
+   in `cntp/plot.py` now produces only `ndwi_vs_intensity.png` and
+   `stable_terrain_rgb.png`. The geometry-only 3D scatter wasn't carrying
+   information that NDWI/RGB didn't already convey.
+
+5. **`plot_m3c2_distances` label fix.** The label used to show
+   `med = np.median(d_clipped)` computed on the ±3σ-clipped distribution,
+   which silently differed from the median reported by `run_m3c2` over the
+   full data. Now the label uses the un-clipped median **and std** for both
+   before and after; clipping is applied only to the histogram bins so a
+   few outliers don't squash the x-axis.
+
+### To revert
+- `cntp/metashape.py`: change `run_single_day_fixed_iop` export back to
+  `{date}_cloud.laz` (rename `cloud_path` → `laz_path` + the format suffix).
+- `cntp/asp.py`:
+  - Restore the unconditional pre-write block in `pc_align_p2p_sp2p` (the
+    `tba_ds_path = ds_dir / (tba_las.stem + "_full.las")` branch + the
+    `if not tba_ds_path.exists(): save_las(...)` save).
+  - Restore the old `extract_stable_reference` body that saved
+    `<stem>_slope.las` and returned `(out_path, slope_path)`.
+  - Re-add the `ref_slope_las` parameter to `evaluate_coreg` and the
+    reference-plotting branch.
+- `cntp/plot.py`:
+  - Re-add the `_plot_if_missing(..., "stable_terrain_geometry.png", ...)`
+    block in `plot_stable_terrain_diagnostics`.
+  - Restore the old `plot_m3c2_distances` body (clip first, then compute
+    median on clipped data, no std in label).
+- `cntp/pipeline_4dsfm.py`:
+  - Move `ref_ds_path` / `stable_ref` back under each day's
+    `coreg/downsampled/` and `coreg/stable_ref/`.
+  - Restore the destructured `stable_ref, _ = extract_stable_reference(...)`.
+  - Restore the Step 3 call to use `ref_las = ref_cloud` and
+    `ref_downsample_factor = ref_downsample`.
+  - Rename `tba_las_path` back to `laz_path`.
+
+---
+
+## 2026-05-19 — Move pipeline logic into the library; slim the notebook
+
+### Goal
+Replace the long step-by-step notebook with a thin driver that just calls one
+library function. All orchestration now lives in `cntp/`.
+
+### Files added
+- **`cntp/asp.py`** — moved verbatim from `contributors/umayr/tools.py`. Contains
+  the three-stage ICP coreg (`pc_align_p2p_sp2p`, `extract_stable_reference`,
+  `evaluate_coreg`), camera-transform helpers (`apply_coreg_to_cameras`,
+  `apply_coreg_to_cameras_ecef`, `las_utm_to_ecef`, `wgs84_to_utm`,
+  `utm_to_wgs84`), and internal helpers (`_check_asp`, `_run_command`,
+  `_read_asp_transform`, `pc_align_stage`, `_apply_transform_to_las`).
+- **`cntp/pipeline_4dsfm.py`** — single `run_4dsfm_day(...)` function that
+  orchestrates Steps 1, 2, 3, 3b, 4, 6, 6b, 7. Each step skips itself if its
+  key output file already exists; pass `overwrite=True` to force recompute.
+
+### Files modified
+- **`cntp/metashape.py`** — added `rebuild_coreg_cloud(psx_path, transform_path,
+  output_laz, depth_downscale, utm_epsg)` at the end. Encapsulates the
+  open-PSX → apply `T_ecef @ M_old` → `buildDepthMaps` → `buildPointCloud` →
+  `exportPointCloud` flow that has to run in a single Metashape session (the
+  matrix is recomputed from GPS priors on every `doc.open()`). Also added a
+  tiny `_read_4x4_matrix` helper (avoids importing from `cntp.asp` to keep the
+  module dependency direction clean) and the `numpy` import.
+- **`contributors/umayr/4d_sfm_pipeline.ipynb`** — slimmed from 24 cells
+  (inline Metashape + ASP + matplotlib) to 6 cells: title markdown, imports
+  (`from cntp.pipeline_4dsfm import run_4dsfm_day`), config markdown, config
+  (paths + `params` dict), run markdown, single `run_4dsfm_day(...)` call +
+  summary print.
+
+### Files removed
+- **`contributors/umayr/tools.py`** — superseded by `cntp/asp.py`. Stale
+  `__pycache__/tools.cpython-*.pyc` cleaned too.
+
+### Pipeline param defaults captured
+`run_4dsfm_day` defaults match the values that produced the validated
+2023-12-15 run: `ref_downsample=0.4`, `p2p_max_disp=10`, `sp2p_max_disp=5`,
+`m_sp2p_max_disp=2`, `use_ecef=True`, `match_downscale=0`, `depth_downscale=2`,
+`loc_acc_new=(0.5,0.5,0.5)`, `rot_acc_new=(5.0,5.0,5.0)`.
+
+### To revert
+- Restore `contributors/umayr/tools.py` from `git show backup_4dsfm^:contributors/umayr/tools.py > contributors/umayr/tools.py`.
+- Delete `cntp/asp.py` and `cntp/pipeline_4dsfm.py`.
+- Remove `rebuild_coreg_cloud`, `_read_4x4_matrix`, and the `import numpy as np`
+  line from `cntp/metashape.py` (everything below the
+  `# 4D SfM pipeline — rebuild co-registered cloud …` divider).
+- Restore the old notebook from `git show backup_4dsfm^:contributors/umayr/4d_sfm_pipeline.ipynb > contributors/umayr/4d_sfm_pipeline.ipynb`.
+
+### Knock-on effects (not handled — call out for the user)
+The following untracked notebooks under `contributors/umayr/` still have
+`import tools` and `from tools import ...` lines, which will fail now that
+`tools.py` is gone:
+- `asp_coreg.ipynb`
+- `asp_coreg_ecef.ipynb`
+- `overview.ipynb`
+
+Replace those imports with `from cntp.asp import ...` if you want to run them.
+The notebooks under `contributors/marin/` and `contributors/friedrich/` use a
+different `tools.py` in their own folder and are unaffected.
+
+---
+
 ## 2026-05-19 — Fix registry date-format drift breaking sensor assignment
 
 ### Problem

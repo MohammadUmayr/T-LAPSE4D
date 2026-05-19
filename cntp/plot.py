@@ -70,34 +70,27 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
                         filename: str = "m3c2_distances.png") -> None:
     """Histogram of M3C2 distances before and after co-registration.
 
-    Parameters
-    ----------
-    dist_before : np.ndarray
-        Raw M3C2 distances before ICP (may contain NaN).
-    dist_after : np.ndarray
-        Raw M3C2 distances after ICP (may contain NaN).
-    output_dir : str | Path
-        Directory where the plot is saved.
-    title : str
-        Title suffix shown on the plot.
-    filename : str
-        Output filename (default: m3c2_distances.png).
+    Stats in the label are computed on the full un-clipped distance array.
+    Histogram bins are clipped to ±3σ of the *before* distribution so a few
+    outliers don't squash the x-axis.
     """
     d_before = dist_before[~np.isnan(dist_before)]
     d_after  = dist_after[~np.isnan(dist_after)]
 
-    # Clip to ±3 std of the before distribution to keep axes readable
-    clip = 3 * np.std(d_before)
-    d_before = np.clip(d_before, -clip, clip)
-    d_after  = np.clip(d_after,  -clip, clip)
+    med_before, std_before = float(np.median(d_before)), float(np.std(d_before))
+    med_after,  std_after  = float(np.median(d_after)),  float(np.std(d_after))
+
+    clip = 3 * std_before
+    d_before_plot = np.clip(d_before, -clip, clip)
+    d_after_plot  = np.clip(d_after,  -clip, clip)
 
     fig, ax = plt.subplots()
-    ax.hist(d_before, bins=60, alpha=0.5, label='before', color='steelblue')
-    ax.hist(d_after,  bins=60, alpha=0.5, label='after',  color='tomato')
-    ax.axvline(float(np.median(d_before)), color='steelblue', linestyle='--', linewidth=1.2,
-               label=f'med before = {np.median(d_before):.3f} m')
-    ax.axvline(float(np.median(d_after)),  color='tomato',    linestyle='--', linewidth=1.2,
-               label=f'med after  = {np.median(d_after):.3f} m')
+    ax.hist(d_before_plot, bins=60, alpha=0.5, label='before', color='steelblue')
+    ax.hist(d_after_plot,  bins=60, alpha=0.5, label='after',  color='tomato')
+    ax.axvline(med_before, color='steelblue', linestyle='--', linewidth=1.2,
+               label=f'before : med = {med_before:+.3f} m  std = {std_before:.3f} m')
+    ax.axvline(med_after, color='tomato', linestyle='--', linewidth=1.2,
+               label=f'after  : med = {med_after:+.3f} m  std = {std_after:.3f} m')
     ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
     ax.set_xlabel('M3C2 distance (m)')
     ax.set_ylabel('Count')
@@ -120,38 +113,13 @@ def plot_stable_terrain_diagnostics(stable_slope: np.ndarray,
                                      output_dir,
                                      title: str,
                                      overwrite: bool = False) -> None:
-    """Generate all three diagnostic plots for a point cloud.
+    """Generate the two diagnostic plots for a point cloud.
 
     Produces:
-      - stable_terrain_geometry.png  (slope-filtered points, before NDWI filter)
-      - ndwi_vs_intensity.png        (NDWI scatter with separation line, before NDWI filter)
-      - stable_terrain_rgb.png       (RGB-coloured points after both filters)
-
-    Parameters
-    ----------
-    stable_slope : np.ndarray
-        Points after slope filter only (Nx9).
-    stable_final : np.ndarray
-        Points after slope + NDWI filter (Nx9).
-    ndwi : np.ndarray
-        NDWI values computed from stable_slope.
-    grayscale_intensity : np.ndarray
-        Mean RGB intensity computed from stable_slope.
-    line_a : float
-        Slope of the NDWI vs intensity separation line.
-    line_b : float
-        Intercept of the NDWI vs intensity separation line.
-    output_dir : str | Path
-        Directory where plots are saved.
-    title : str
-        Title suffix used in plot titles and the RGB plot title.
-    overwrite : bool
-        If False (default), skip plots that already exist.
+      - ndwi_vs_intensity.png   (NDWI scatter with separation line, pre-NDWI-filter)
+      - stable_terrain_rgb.png  (RGB-coloured points after both filters)
     """
     output_dir = Path(output_dir)
-
-    _plot_if_missing(overwrite, output_dir / "stable_terrain_geometry.png",
-                     lambda: plot_stable_terrain_geometry(stable_slope, output_dir))
 
     _plot_if_missing(overwrite, output_dir / "ndwi_vs_intensity.png",
                      lambda: plot_ndwi_vs_intensity(

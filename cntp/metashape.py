@@ -48,6 +48,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 # Metashape is an optional runtime dependency; imported lazily inside
@@ -1357,20 +1358,144 @@ def run_single_day_fixed_iop(
     doc.save()
 
     # ── Exports ───────────────────────────────────────────────────────────
-    laz_path = day_dir / f"{date}_cloud.laz"
-    utm_crs  = Metashape.CoordinateSystem(f"EPSG::{utm_epsg}")
+    # Export as uncompressed .las so ASP pc_align can read it directly without
+    # decompressing on every stage (saves a ~250 MB duplicate `_full.las`
+    # write inside the coreg step).
+    cloud_path = day_dir / f"{date}_cloud.las"
+    utm_crs    = Metashape.CoordinateSystem(f"EPSG::{utm_epsg}")
     chunk.exportPointCloud(
-        str(laz_path),
+        str(cloud_path),
         source_data=Metashape.PointCloudData,
         format=Metashape.PointCloudFormatLAS,
         crs=utm_crs,
         save_point_color=True,
     )
-    print(f"  Exported LAZ : {laz_path.name}  (EPSG:{utm_epsg})", flush=True)
+    print(f"  Exported LAS : {cloud_path.name}  (EPSG:{utm_epsg})", flush=True)
 
     cameras_csv_out = day_dir / f"{date}_cameras.csv"
     _export_camera_csv(chunk, cameras_csv_out)
 
     doc.save()
     print(f"  Project saved : {psx_path.name}", flush=True)
-    return laz_path, cameras_csv_out
+    return cloud_path, cameras_csv_out
+
+
+# ---------------------------------------------------------------------------
+# 4D SfM pipeline — rebuild co-registered cloud from a Metashape project
+# ---------------------------------------------------------------------------
+
+def _read_4x4_matrix(path: Path) -> np.ndarray:
+    """Parse the first 4-row × 4-col float matrix found in *path* (ASP format)."""
+    rows = []
+    for line in Path(path).read_text().splitlines():
+        parts = line.strip().split()
+        if len(parts) == 4:
+            try:
+                rows.append(list(map(float, parts)))
+            except ValueError:
+                pass
+        if len(rows) == 4:
+            break
+    if len(rows) != 4:
+        raise ValueError(f"Could not parse a 4×4 matrix from {path}")
+    return np.array(rows)
+
+
+def rebuild_coreg_cloud(
+    psx_path: Path,
+    transform_path: Path,
+    output_laz: Path,
+    depth_downscale: int,
+    utm_epsg: int,
+) -> Path:
+    """Apply the ASP ECEF transform to a Metashape project and rebuild its cloud.
+
+    Composes ``M_new = T_ecef @ M_old`` on ``chunk.transform.matrix`` (both
+    live in WGS84 geocentric ECEF — same space as the ASP transform, so no
+    CRS conversion needed), then runs ``buildDepthMaps``, ``buildPointCloud``,
+    and ``exportPointCloud`` in the same session. Metashape recomputes
+    ``chunk.transform.matrix`` from GPS priors on every ``doc.open()``, so any
+    matrix assignment must be followed by the cloud rebuild + export in the
+    same session — otherwise the corrected transform is silently lost.
+
+    Parameters
+    ----------
+    psx_path : Path
+        Single-day Metashape project (``*.psx``) from
+        :func:`run_single_day_fixed_iop`.
+    transform_path : Path
+        ASP ``run-transform.txt`` from the final pc_align stage (Stage 3's
+        file contains the full composed T3 ∘ T2 ∘ T1).
+    output_laz : Path
+        Validated cloud destination (``.laz``).
+    depth_downscale : int
+        ``buildDepthMaps`` downscale (1 = full, 2 = half, 4 = quarter …).
+    utm_epsg : int
+        UTM EPSG for the exported cloud's CRS.
+
+    Returns
+    -------
+    Path
+        ``output_laz``.
+    """
+    if Metashape is None:
+        raise ImportError("Metashape Python module is not installed.")
+
+    psx_path       = Path(psx_path)
+    transform_path = Path(transform_path)
+    output_laz     = Path(output_laz)
+    output_laz.parent.mkdir(parents=True, exist_ok=True)
+
+    T_ecef = _read_4x4_matrix(transform_path)
+
+    doc = Metashape.Document()
+    doc.clear()
+    doc.open(str(psx_path), read_only=False, ignore_lock=True)
+    chunk = doc.chunk
+
+    def _cam_wgs84() -> tuple:
+        cam = next((c for c in chunk.cameras if c.transform), None)
+        if cam is None:
+            return None, None
+        p = chunk.crs.project(chunk.transform.matrix.mulp(cam.center))
+        return cam.label, (p[0], p[1], p[2])
+
+    def _shift_m(p0: tuple, p1: tuple) -> float:
+        import math
+        dlat = (p1[1] - p0[1]) * 111_320
+        dlon = (p1[0] - p0[0]) * 111_320 * math.cos(math.radians((p0[1] + p1[1]) / 2))
+        return (dlat ** 2 + dlon ** 2 + (p1[2] - p0[2]) ** 2) ** 0.5
+
+    lbl, p0 = _cam_wgs84()
+    print(f"  [{lbl}] ON LOAD : alt={p0[2]:.3f} m", flush=True)
+
+    M_old = chunk.transform.matrix
+    M_np  = np.array([[M_old[r, c] for c in range(4)] for r in range(4)])
+    M_new = T_ecef @ M_np
+    chunk.transform.matrix = Metashape.Matrix(
+        [[float(M_new[r, c]) for c in range(4)] for r in range(4)]
+    )
+
+    _, p1 = _cam_wgs84()
+    print(f"  [{lbl}] AFTER T : alt={p1[2]:.3f} m  shift={_shift_m(p0, p1):.4f} m", flush=True)
+
+    print("  Building depth maps ...", flush=True)
+    chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=Metashape.MildFiltering)
+
+    print("  Building point cloud ...", flush=True)
+    chunk.buildPointCloud()
+
+    _, p2 = _cam_wgs84()
+    print(f"  [{lbl}] AFTER buildPointCloud : alt={p2[2]:.3f} m  shift from T={_shift_m(p1, p2):.4f} m", flush=True)
+
+    utm_crs = Metashape.CoordinateSystem(f"EPSG::{utm_epsg}")
+    chunk.exportPointCloud(
+        str(output_laz),
+        source_data      = Metashape.PointCloudData,
+        format           = Metashape.PointCloudFormatLAS,
+        crs              = utm_crs,
+        save_point_color = True,
+    )
+    doc.save()
+    print(f"  Validation cloud → {output_laz.name}", flush=True)
+    return output_laz

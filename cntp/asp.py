@@ -519,7 +519,7 @@ def extract_stable_reference(
     glacier_mask_path: Path = None,
     slope_threshold: float = 60.0,
     plot_dir: Path = None,
-) -> tuple[Path, Path]:
+) -> Path:
     """Build the glacier-masked, slope-filtered reference cloud for Stage 3.
 
     Equivalent to ``hsfm.utils.mask_dem`` which removes unstable surfaces
@@ -548,30 +548,38 @@ def extract_stable_reference(
 
     Returns
     -------
-    stable_path : Path
-        Glacier-masked, slope/NDWI-filtered stable-terrain cloud
-        (``<stem>_stable.las``).
-    slope_path : Path
-        Pre-filter cloud after glacier mask, before slope/NDWI filter
-        (``<stem>_slope.las``).  Pass as ``ref_slope_las`` to
-        :func:`evaluate_coreg` to generate reference diagnostic plots
-        without recomputing.
+    Path
+        ``<stem>_stable.las`` — glacier-masked + slope/NDWI-filtered cloud.
+        When ``plot_dir`` is set, the reference NDWI-vs-intensity and stable
+        terrain RGB plots are written there inline so the pre-NDWI-filter
+        cloud doesn't need to be saved to disk.
     """
     ref_cloud_path = Path(ref_cloud_path)
     output_dir     = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cloud = load_las(ref_cloud_path)
+    out_path = output_dir / (ref_cloud_path.stem + "_stable.las")
 
-    # 1. Remove glacier surface  (HSfM: dem_mask.py --glaciers)
+    # Full cache: if both the stable cloud and the requested plots already
+    # exist, skip the expensive load + KDTree pass entirely.
+    plots_exist = True
+    if plot_dir is not None:
+        plot_dir = Path(plot_dir)
+        plots_exist = (
+            (plot_dir / "ndwi_vs_intensity.png").exists()
+            and (plot_dir / "stable_terrain_rgb.png").exists()
+        )
+    if out_path.exists() and plots_exist:
+        print(f"  Stable reference cached → {out_path.name}")
+        return out_path
+
+    cloud = load_las(ref_cloud_path)
     if glacier_mask_path is not None:
         cloud = apply_glacier_mask(cloud, glacier_mask_path)
 
-    # 2. Slope + NDWI filter  (HSfM: dem_mask.py --nlcd)
     stable_slope, stable = extract_stable_terrain(cloud, slope_threshold=slope_threshold)
 
     if plot_dir is not None:
-        plot_dir = Path(plot_dir)
         plot_dir.mkdir(parents=True, exist_ok=True)
         grayscale = np.mean(stable_slope[:, 3:6], axis=1)
         ndwi = (stable_slope[:, 5] - stable_slope[:, 3]) / (stable_slope[:, 3] + stable_slope[:, 5])
@@ -580,13 +588,9 @@ def extract_stable_reference(
             _NDWI_A, _NDWI_B, plot_dir, title="reference",
         )
 
-    out_path   = output_dir / (ref_cloud_path.stem + "_stable.las")
-    slope_path = output_dir / (ref_cloud_path.stem + "_slope.las")
-    save_las(stable,       out_path)
-    save_las(stable_slope, slope_path)
-
+    save_las(stable, out_path)
     print(f"  Stable reference → {out_path}  ({len(stable):,} pts)")
-    return out_path, slope_path
+    return out_path
 
 
 # ---------------------------------------------------------------------------
@@ -702,17 +706,19 @@ def pc_align_p2p_sp2p(
     else:
         ref_icp = ref_las
 
-    # Always pre-write TBA to an uncompressed .las so ASP doesn't decompress
-    # the source .laz on-the-fly every stage run (3× slower, no caching).
+    # When downsampling TBA, write a cached subset to disk so the same random
+    # sample is reused across all three stages. When not downsampling, pass
+    # *tba_las* straight to ASP — saves a redundant ~250 MB copy per day.
+    # *tba_las* should be uncompressed .las (single-day BA now exports .las
+    # directly so ASP doesn't have to decompress on every stage).
     if _tba_ds < 1.0:
         tba_ds_path = ds_dir / (tba_las.stem + f"_ds{_tba_ds:.2f}.las")
+        if not tba_ds_path.exists():
+            print(f"  Saving downsampled TBA ({_tba_ds:.0%}) → {tba_ds_path}")
+            save_las(load_las(tba_las, downsample_factor=_tba_ds), tba_ds_path)
+        tba_icp = tba_ds_path
     else:
-        tba_ds_path = ds_dir / (tba_las.stem + "_full.las")
-    if not tba_ds_path.exists():
-        label = f"{_tba_ds:.0%}" if _tba_ds < 1.0 else "full"
-        print(f"  Saving TBA ({label}) → {tba_ds_path}")
-        save_las(load_las(tba_las, downsample_factor=_tba_ds if _tba_ds < 1.0 else 1.0), tba_ds_path)
-    tba_icp = tba_ds_path
+        tba_icp = tba_las
 
     ref_stage3 = Path(stable_ref_las) if stable_ref_las else ref_icp
 
@@ -800,7 +806,6 @@ def evaluate_coreg(
     plot_dir: Path = None,
     stable_dir: Path = None,
     stable_ref_las: Path = None,
-    ref_slope_las: Path = None,
 ) -> dict:
     """Compute M3C2 distances on stable terrain before and after co-registration.
 
@@ -837,11 +842,8 @@ def evaluate_coreg(
         not loaded or filtered — the cached file is used directly, skipping
         the glacier-mask and slope/NDWI KDTree passes for the reference.
         ``ref_las`` and ``ref_downsample_factor`` are ignored in this case.
-    ref_slope_las:
-        Pre-filter reference cloud saved by :func:`extract_stable_reference`
-        (``<stem>_slope.las``).  Only used when ``stable_ref_las`` is also
-        provided.  When set, the reference diagnostic plot is generated in
-        ``plot_dir/reference/`` with no recomputation.
+        Reference diagnostic plots (NDWI + RGB) are generated at
+        :func:`extract_stable_reference` time so this function only plots TBA.
 
     Returns
     -------
@@ -861,31 +863,27 @@ def evaluate_coreg(
 
     if stable_ref_las is not None:
         ref_stable = load_las(Path(stable_ref_las))
-        ref_slope  = load_las(Path(ref_slope_las)) if ref_slope_las is not None else None
     else:
         ref = load_las(ref_las, downsample_factor=ref_downsample_factor)
         if glacier_mask_path is not None:
             ref = apply_glacier_mask(ref, glacier_mask_path)
-        ref_slope, ref_stable = extract_stable_terrain(ref, slope_threshold=slope_threshold)
+        _, ref_stable = extract_stable_terrain(ref, slope_threshold=slope_threshold)
 
     before_slope, before_stable = extract_stable_terrain(before, slope_threshold=slope_threshold)
     after_slope,  after_stable  = extract_stable_terrain(after,  slope_threshold=slope_threshold)
 
+    # Reference plots are generated once in extract_stable_reference; here we
+    # only plot the (per-day) TBA cloud's NDWI + stable-terrain RGB.
     if plot_dir is not None:
         plot_dir = Path(plot_dir)
-        to_plot = []
-        if ref_slope is not None:
-            to_plot.append((ref_slope, ref_stable, "reference"))
-        to_plot.append((before_slope, before_stable, "tba"))
-        for cloud_slope, cloud_stable, name in to_plot:
-            d = plot_dir / name
-            d.mkdir(parents=True, exist_ok=True)
-            grayscale = np.mean(cloud_slope[:, 3:6], axis=1)
-            ndwi = (cloud_slope[:, 5] - cloud_slope[:, 3]) / (cloud_slope[:, 3] + cloud_slope[:, 5])
-            plot_stable_terrain_diagnostics(
-                cloud_slope, cloud_stable, ndwi, grayscale,
-                _NDWI_A, _NDWI_B, d, title=name,
-            )
+        tba_plot_dir = plot_dir / "tba"
+        tba_plot_dir.mkdir(parents=True, exist_ok=True)
+        grayscale = np.mean(before_slope[:, 3:6], axis=1)
+        ndwi = (before_slope[:, 5] - before_slope[:, 3]) / (before_slope[:, 3] + before_slope[:, 5])
+        plot_stable_terrain_diagnostics(
+            before_slope, before_stable, ndwi, grayscale,
+            _NDWI_A, _NDWI_B, tba_plot_dir, title="tba",
+        )
 
     def _to_epoch(pts: np.ndarray) -> py4dgeo.Epoch:
         return py4dgeo.Epoch(pts[:, :3])
