@@ -211,6 +211,18 @@ def _image_date(label: str) -> str:
     return label.split("_")[1]
 
 
+def _normalize_date(value) -> str:
+    """Coerce any pandas-readable date to canonical 'YYYY-MM-DD' string.
+
+    Registry CSVs are sometimes opened in Excel/LibreOffice, which rewrites
+    the date column to a locale format (e.g. '11/27/2023'). Sensor lookup
+    keys come from `_image_date()` which always yields 'YYYY-MM-DD' from the
+    image label, so a format drift in the CSV silently breaks the lookup
+    and Metashape auto-merges all reference images into one sensor.
+    """
+    return pd.to_datetime(value).strftime("%Y-%m-%d")
+
+
 def _setup_sensors(
     chunk: "Metashape.Chunk",
     calib_xmls: dict[str, Path],
@@ -1017,10 +1029,12 @@ def update_registry(
 
     if registry_csv.exists():
         existing = pd.read_csv(registry_csv)
+        existing["date"] = existing["date"].map(_normalize_date)
         combined = pd.concat([existing, new_df], ignore_index=True)
     else:
         combined = new_df
 
+    combined["date"] = combined["date"].map(_normalize_date)
     combined.to_csv(registry_csv, index=False)
     print(f"  Registry updated : {registry_csv.name}  ({len(rows)} rows added, "
           f"{len(combined)} total)")
@@ -1084,6 +1098,7 @@ def run_multitemporal_ba(
     psx_path = sfm_dir / f"{date}_4DSfM.psx"
 
     reg_df = pd.read_csv(reference_registry_csv)
+    reg_df["date"] = reg_df["date"].map(_normalize_date)
     n_ref  = len(reg_df)
     n_new  = sum(len(v) for v in date_images.values())
 
