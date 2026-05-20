@@ -88,9 +88,11 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
     ax.hist(d_before_plot, bins=60, alpha=0.5, label='before', color='steelblue')
     ax.hist(d_after_plot,  bins=60, alpha=0.5, label='after',  color='tomato')
     ax.axvline(med_before, color='steelblue', linestyle='--', linewidth=1.2,
-               label=f'before : med = {med_before:+.3f} m  std = {std_before:.3f} m')
+               label=f'med before = {med_before:+.3f} m')
     ax.axvline(med_after, color='tomato', linestyle='--', linewidth=1.2,
-               label=f'after  : med = {med_after:+.3f} m  std = {std_after:.3f} m')
+               label=f'med after  = {med_after:+.3f} m')
+    ax.plot([], [], ' ', label=f'std before = {std_before:.3f} m')
+    ax.plot([], [], ' ', label=f'std after  = {std_after:.3f} m')
     ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
     ax.set_xlabel('M3C2 distance (m)')
     ax.set_ylabel('Count')

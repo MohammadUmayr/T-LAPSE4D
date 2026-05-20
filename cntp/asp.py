@@ -411,22 +411,22 @@ def pc_align_stage(
     alignment_method: str,
     max_displacement: float,
     initial_transform: Path = None,
-    ref_downsample_factor: float = 1.0,
-    tba_downsample_factor: float = None,
-    utm_epsg: int = None,
     verbose: bool = False,
 ) -> Path:
     """Run one stage of ASP ``pc_align`` on two LAZ/LAS point clouds.
 
-    Mirrors a single ``hsfm.asp.pc_align`` call inside ``pc_align_p2p_sp2p``.
-    LAZ/LAS files are passed directly — no intermediate CSV conversion.
+    Caller is responsible for preparing *tba_las* and *ref_las* in the
+    coordinate space pc_align should read (UTM or ECEF) and at the desired
+    sampling density. This function just invokes pc_align with the given
+    paths — no on-the-fly downsampling or CRS conversion. See
+    :func:`pc_align_p2p_sp2p` for the full three-stage orchestrator that
+    handles ECEF conversion and TBA/ref caching once for all stages.
 
     Parameters
     ----------
-    tba_las:
-        To-be-aligned (source) LAZ or LAS cloud.
-    ref_las:
-        Reference LAZ or LAS cloud.
+    tba_las, ref_las:
+        Source and reference LAZ/LAS clouds — already in the target CRS and
+        at the target density.
     output_prefix:
         File-path prefix for pc_align outputs (parent directory is created).
     alignment_method:
@@ -435,20 +435,9 @@ def pc_align_stage(
     max_displacement:
         Maximum allowed correspondence distance [m].
     initial_transform:
-        Path to the ``*-transform.txt`` from the previous stage.
-        ASP pre-applies this and compounds it with the new ICP result, so
-        the output file contains the full accumulated composition.
-    ref_downsample_factor:
-        Fraction of reference cloud points to keep (0 < factor <= 1.0).
-        A downsampled copy is saved to a ``downsampled/`` folder next to
-        *output_prefix* and passed to ``pc_align``. Default 1.0 skips this.
-    tba_downsample_factor:
-        Fraction of TBA cloud points to keep. Defaults to ``ref_downsample_factor``.
-    utm_epsg:
-        When set, convert the (downsampled) clouds from UTM to ECEF before
-        passing to ``pc_align``.  ASP then runs ICP in true ECEF space and
-        the output transform is a genuine ECEF matrix.  ECEF files are kept
-        in an ``ecef/`` sub-folder next to ``downsampled/`` for debugging.
+        Path to the ``*-transform.txt`` from the previous stage. ASP
+        pre-applies this and compounds it with the new ICP result, so the
+        output file contains the full accumulated composition.
     verbose:
         Print the pc_align call and its stdout.
 
@@ -458,39 +447,6 @@ def pc_align_stage(
     """
     output_prefix = Path(output_prefix)
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
-
-    _tba_ds = tba_downsample_factor if tba_downsample_factor is not None else ref_downsample_factor
-
-    ds_dir = output_prefix.parent / "downsampled"
-
-    if ref_downsample_factor < 1.0:
-        ds_dir.mkdir(parents=True, exist_ok=True)
-        ref_path = ds_dir / (Path(ref_las).stem + f"_ds{ref_downsample_factor:.2f}.las")
-        if not ref_path.exists():
-            save_las(load_las(ref_las, downsample_factor=ref_downsample_factor), ref_path)
-    else:
-        ref_path = Path(ref_las)
-
-    if _tba_ds < 1.0:
-        ds_dir.mkdir(parents=True, exist_ok=True)
-        tba_path = ds_dir / (Path(tba_las).stem + f"_ds{_tba_ds:.2f}.las")
-        if not tba_path.exists():
-            save_las(load_las(tba_las, downsample_factor=_tba_ds), tba_path)
-    else:
-        tba_path = Path(tba_las)
-
-    if utm_epsg is not None:
-        ecef_dir = output_prefix.parent / "ecef"
-        ecef_dir.mkdir(parents=True, exist_ok=True)
-        ref_ecef = ecef_dir / (ref_path.stem + "_ecef.las")
-        if not ref_ecef.exists():
-            las_utm_to_ecef(ref_path, utm_epsg, ref_ecef)
-        ref_path = ref_ecef
-
-        tba_ecef = ecef_dir / (tba_path.stem + "_ecef.las")
-        if not tba_ecef.exists():
-            las_utm_to_ecef(tba_path, utm_epsg, tba_ecef)
-        tba_path = tba_ecef
 
     cmd = [
         "pc_align",
@@ -503,7 +459,7 @@ def pc_align_stage(
         cmd += ["--initial-transform", str(initial_transform)]
 
     # ASP convention: reference first, then source
-    cmd += [str(ref_path), str(tba_path)]
+    cmd += [str(ref_las), str(tba_las)]
 
     _run_command(cmd, verbose=verbose)
     return output_prefix.parent / (output_prefix.name + "-transform.txt")
@@ -723,6 +679,38 @@ def pc_align_p2p_sp2p(
     ref_stage3 = Path(stable_ref_las) if stable_ref_las else ref_icp
 
     # ------------------------------------------------------------------
+    # ECEF mode: convert each cloud once and share across all three stages.
+    # Ref ECEFs land next to their source (auto-tracks into _ref_cache/ecef/
+    # when the orchestrator passes a shared-cache ref). TBA ECEF lives under
+    # the per-day coreg output dir.
+    # ------------------------------------------------------------------
+    if utm_epsg is not None:
+        ref_ecef_dir = ref_icp.parent / "ecef"
+        ref_ecef_dir.mkdir(parents=True, exist_ok=True)
+        ref_ecef = ref_ecef_dir / (ref_icp.stem + "_ecef.las")
+        if not ref_ecef.exists():
+            las_utm_to_ecef(ref_icp, utm_epsg, ref_ecef)
+        ref_icp_pc = ref_ecef
+
+        ref_stage3_ecef_dir = ref_stage3.parent / "ecef"
+        ref_stage3_ecef_dir.mkdir(parents=True, exist_ok=True)
+        ref_stage3_ecef = ref_stage3_ecef_dir / (ref_stage3.stem + "_ecef.las")
+        if not ref_stage3_ecef.exists():
+            las_utm_to_ecef(ref_stage3, utm_epsg, ref_stage3_ecef)
+        ref_stage3_pc = ref_stage3_ecef
+
+        tba_ecef_dir = output_dir / "ecef"
+        tba_ecef_dir.mkdir(parents=True, exist_ok=True)
+        tba_ecef = tba_ecef_dir / (tba_icp.stem + "_ecef.las")
+        if not tba_ecef.exists():
+            las_utm_to_ecef(tba_icp, utm_epsg, tba_ecef)
+        tba_icp_pc = tba_ecef
+    else:
+        ref_icp_pc    = ref_icp
+        ref_stage3_pc = ref_stage3
+        tba_icp_pc    = tba_icp
+
+    # ------------------------------------------------------------------
     # Stage 1: point-to-plane ICP
     # Corrects large initial position offsets (rigid body).
     # HSfM uses max_displacement = 2000 m for km-scale NAGAP errors.
@@ -730,11 +718,10 @@ def pc_align_p2p_sp2p(
     print(f"  Stage 1 — point-to-plane ICP "
           f"(max_displacement={p2p_max_displacement} m)")
     t1 = pc_align_stage(
-        tba_icp, ref_icp,
+        tba_icp_pc, ref_icp_pc,
         output_dir / "stage1" / "run",
         alignment_method="point-to-plane",
         max_displacement=p2p_max_displacement,
-        utm_epsg=utm_epsg,
         verbose=verbose,
     )
 
@@ -747,12 +734,11 @@ def pc_align_p2p_sp2p(
     print(f"  Stage 2 — similarity-point-to-point ICP "
           f"(max_displacement={sp2p_max_displacement} m)")
     t2 = pc_align_stage(
-        tba_icp, ref_icp,
+        tba_icp_pc, ref_icp_pc,
         output_dir / "stage2" / "run",
         alignment_method="similarity-point-to-point",
         max_displacement=sp2p_max_displacement,
         initial_transform=t1,
-        utm_epsg=utm_epsg,
         verbose=verbose,
     )
 
@@ -766,12 +752,11 @@ def pc_align_p2p_sp2p(
     print(f"  Stage 3 — similarity-point-to-point ICP, stable terrain only "
           f"(max_displacement={m_sp2p_max_displacement} m)")
     t3 = pc_align_stage(
-        tba_icp, ref_stage3,
+        tba_icp_pc, ref_stage3_pc,
         output_dir / "stage3" / "run",
         alignment_method="similarity-point-to-point",
         max_displacement=m_sp2p_max_displacement,
         initial_transform=t2,
-        utm_epsg=utm_epsg,
         verbose=verbose,
     )
 

@@ -4,6 +4,134 @@ Each entry records what was added or changed, where, and exactly what to remove 
 
 ---
 
+## 2026-05-20 — Split m3c2_distances legend onto four separate lines
+
+### Change to `cntp/plot.py` — `plot_m3c2_distances`
+The two combined "before : med X std Y" / "after : med X std Y" legend
+entries are split into four individual lines so each metric reads on its
+own row:
+
+```
+■ before
+■ after
+- - med before = -0.312 m
+- - med after  = -0.186 m
+     std before =  1.155 m
+     std after  =  1.172 m
+```
+
+Med entries still anchor a coloured dashed axvline. Std entries use a
+plotted-with-blank-handle pattern (`ax.plot([], [], ' ', label=...)`) so
+they appear as plain text in the legend without drawing anything.
+
+### To revert
+Restore the two-line label form:
+```python
+ax.axvline(med_before, color='steelblue', linestyle='--', linewidth=1.2,
+           label=f'before : med = {med_before:+.3f} m  std = {std_before:.3f} m')
+ax.axvline(med_after, color='tomato', linestyle='--', linewidth=1.2,
+           label=f'after  : med = {med_after:+.3f} m  std = {std_after:.3f} m')
+```
+and drop the two `ax.plot([], [], ' ', label=…)` lines.
+
+---
+
+## 2026-05-20 — Diagnosis: M3C2 variance is BA + ref-downsample RNG, not a code regression
+
+Note (no code change). After the ECEF dedup, M3C2-before went from -1.03 m
+(May 17 baseline) to -0.31 m and M3C2-after from -0.0147 m to -0.19 m on a
+fresh run. Investigation traced the swing to two pre-existing sources of
+non-determinism, neither caused by the optimisations:
+
+1. **Metashape BA + `buildPointCloud`** is non-deterministic on GPU. Same
+   calibration priors and image list yield clouds that differ in extent by
+   ~14 % between runs. Each wipe-and-rerun therefore feeds a noticeably
+   different cloud into ASP.
+2. **`cntp/io.py` `load_las` uses unseeded `np.random.default_rng()`**, so
+   every fresh build of `_ref_cache/Reference_UAV_TLC_PCS_ds0.40.las` picks
+   a different ~40 % subset. Downstream: different stable terrain →
+   different Stage 3 reference → different M3C2.
+
+Step 6b validation reads -0.0005 m (essentially zero), confirming the
+transform pipeline itself is healthy — pc_align is just finding a different
+(but consistent-with-itself) transform for the new input cloud.
+
+User declined the proposed fix for now (seed `load_las`'s RNG so the ref
+downsample is reproducible). When/if reintroduced, the change is a single
+`seed: int | None = 42` parameter on `cntp.io.load_las`.
+
+---
+
+## 2026-05-19 — Dedupe ECEF intermediates across stages and days
+
+### Problem
+Each pc_align stage wrote its own ECEF-converted copy of the reference and
+TBA clouds, producing ~4.4 GB of duplicate intermediate data per day:
+- `stage1/ecef/*_ecef.las` (1.9 GB ref + 204 MB TBA)
+- `stage2/ecef/*_ecef.las` (same ref + TBA, byte-identical to stage1)
+- `stage3/ecef/*_ecef.las` (38 MB stable ref + 204 MB TBA)
+
+Stages 1 and 2 use the same `(ref, TBA)` pair, stage 3 swaps the ref for
+the stable subset. The TBA ECEF is identical across all three. None of
+this changed between days — same `las_utm_to_ecef` math on the same
+shared-cache ref. ~2.3 GB/day wasted; reference ECEFs also regenerated
+per-day even though they only depend on the (shared) ref cloud.
+
+### Fix — convert each cloud once, in the orchestrator
+
+`cntp/asp.py`:
+- `pc_align_stage` no longer does any ECEF conversion or downsampling. It
+  invokes pc_align on the paths it's given. Signature lost
+  `ref_downsample_factor`, `tba_downsample_factor`, and `utm_epsg`.
+- `pc_align_p2p_sp2p` does the ECEF conversion once up-front (before
+  Stage 1), placing each output where it naturally belongs:
+  - **Full ref ECEF** → `ref_icp.parent / "ecef" /<stem>_ecef.las`.
+    Because the orchestrator now passes `ref_las = _ref_cache/.../.las`,
+    this lands inside `_ref_cache/ecef/`, shared across all days.
+  - **Stable ref ECEF** → `ref_stage3.parent / "ecef" /<stem>_ecef.las`.
+    Same logic, ends up in `_ref_cache/ecef/`.
+  - **TBA ECEF** → `coreg_dir / "ecef" /<stem>_ecef.las`. Per-day, but
+    one copy shared across all three stages.
+
+### Result
+
+Old layout (per day):
+```
+coreg/stage1/ecef/{ref}_ecef.las  1.9 GB
+coreg/stage1/ecef/{tba}_ecef.las  204 MB
+coreg/stage2/ecef/{ref}_ecef.las  1.9 GB   ← duplicate of stage1
+coreg/stage2/ecef/{tba}_ecef.las  204 MB   ← duplicate of stage1
+coreg/stage3/ecef/{ref}_stable_ecef.las  38 MB
+coreg/stage3/ecef/{tba}_ecef.las  204 MB   ← duplicate of stage1
+                                  ─────
+                                  ~4.4 GB / day
+```
+
+New layout:
+```
+output_new/_ref_cache/ecef/{ref}_ecef.las         1.9 GB  (shared across days)
+output_new/_ref_cache/ecef/{ref}_stable_ecef.las  38 MB   (shared across days)
+output_new/{date}/coreg/ecef/{tba}_ecef.las       204 MB  (per day)
+```
+
+Per-day footprint drops from ~4.4 GB to ~204 MB. The 1.94 GB of reference
+ECEFs are also amortised across all days.
+
+### To revert
+- `cntp/asp.py`:
+  - Restore `pc_align_stage`'s `ref_downsample_factor`,
+    `tba_downsample_factor`, and `utm_epsg` parameters, plus the per-stage
+    downsample + ECEF blocks (saves to `output_prefix.parent / "ecef"`).
+  - Remove the up-front ECEF conversion block in `pc_align_p2p_sp2p` (the
+    `if utm_epsg is not None:` block before Stage 1).
+  - Restore the per-stage `utm_epsg=utm_epsg` kwarg on each `pc_align_stage`
+    call and the `ref_icp`/`ref_stage3`/`tba_icp` arguments (no `_pc` suffix).
+
+Old `coreg/stage{1,2,3}/ecef/` directories from prior runs are harmless;
+delete them manually or wipe the day folder for a clean start.
+
+---
+
 ## 2026-05-19 — Runtime / disk optimisations (round 1)
 
 ### Goal
