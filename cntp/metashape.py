@@ -525,6 +525,8 @@ def process_day(
         print("  Matching photos ...", flush=True)
         chunk.matchPhotos(
             downscale=match_downscale,
+            keypoint_limit=80000,
+            tiepoint_limit=8000,
             generic_preselection=True,
             reference_preselection=True,
             reference_preselection_mode=Metashape.ReferencePreselectionSource,
@@ -1122,6 +1124,16 @@ def run_multitemporal_ba(
         new_calib_xmls[cam] = refined_xml
 
     # ── Build project ─────────────────────────────────────────────────────
+    # Nuke any stale .psx + .files from a prior crashed run. Without this,
+    # the new doc.save() can latch onto leftover state and Metashape flips
+    # the document to read-only on the next save (see run_4dsfm_day Step 2
+    # / Step 3 errors).
+    psx_files_dir = psx_path.parent / f"{psx_path.stem}.files"
+    if psx_files_dir.exists():
+        shutil.rmtree(psx_files_dir, ignore_errors=True)
+    if psx_path.exists():
+        psx_path.unlink(missing_ok=True)
+
     doc = Metashape.Document()
     doc.save(str(psx_path))
     chunk       = doc.addChunk()
@@ -1187,6 +1199,8 @@ def run_multitemporal_ba(
     print("  Matching photos ...", flush=True)
     chunk.matchPhotos(
         downscale=match_downscale,
+        keypoint_limit=80000,
+        tiepoint_limit=8000,
         generic_preselection=True,
         reference_preselection=True,
         reference_preselection_mode=Metashape.ReferencePreselectionSource,
@@ -1300,6 +1314,16 @@ def run_single_day_fixed_iop(
     }
 
     # ── Build project ─────────────────────────────────────────────────────
+    # Nuke any stale .psx + .files from a prior crashed run. Without this,
+    # Metashape can flip the document to read-only on the second doc.save()
+    # (after alignCameras) — see the "editing is disabled in read-only mode"
+    # error that surfaces when re-running after a crash.
+    psx_files_dir = psx_path.parent / f"{psx_path.stem}.files"
+    if psx_files_dir.exists():
+        shutil.rmtree(psx_files_dir, ignore_errors=True)
+    if psx_path.exists():
+        psx_path.unlink(missing_ok=True)
+
     doc = Metashape.Document()
     doc.save(str(psx_path))
     chunk       = doc.addChunk()
@@ -1325,6 +1349,8 @@ def run_single_day_fixed_iop(
     print("  Matching photos ...", flush=True)
     chunk.matchPhotos(
         downscale=match_downscale,
+        keypoint_limit=80000,
+        tiepoint_limit=8000,
         generic_preselection=True,
         reference_preselection=True,
         reference_preselection_mode=Metashape.ReferencePreselectionSource,

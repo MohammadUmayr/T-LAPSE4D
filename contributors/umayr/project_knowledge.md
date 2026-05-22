@@ -4,61 +4,95 @@ Each entry records what was added or changed, where, and exactly what to remove 
 
 ---
 
-## 2026-05-20 — Split m3c2_distances legend onto four separate lines
+## 2026-05-21 — Metashape stale-state cleanup in 4D SfM project builders
 
-### Change to `cntp/plot.py` — `plot_m3c2_distances`
-The two combined "before : med X std Y" / "after : med X std Y" legend
-entries are split into four individual lines so each metric reads on its
-own row:
+### Problem
+`run_4dsfm_day` raised `OSError: Document.save(): editing is disabled in read-only mode` from the second `doc.save()` (after `alignCameras`) when re-running after a prior crash. Root cause: stale `<basename>.psx` + `<basename>.files/` from the failed run on disk. `Metashape.Document()` + `doc.save(path)` to an existing path leaves the doc in a fragile state that flips to read-only on the next save.
 
-```
-■ before
-■ after
-- - med before = -0.312 m
-- - med after  = -0.186 m
-     std before =  1.155 m
-     std after  =  1.172 m
-```
+### Fix
+Mirror the cleanup `process_day` already had — nuke any stale `<basename>.psx` + `<basename>.files/` directory before `Metashape.Document()` in both 4D SfM builders.
 
-Med entries still anchor a coloured dashed axvline. Std entries use a
-plotted-with-blank-handle pattern (`ax.plot([], [], ' ', label=...)`) so
-they appear as plain text in the legend without drawing anything.
+- `cntp/metashape.py` `run_multitemporal_ba` (now line ~1124) — added 5-line cleanup before `doc = Metashape.Document()`.
+- `cntp/metashape.py` `run_single_day_fixed_iop` (now line ~1312) — same.
+
+Cleanup uses `psx_path.stem` so it works for both naming conventions (`<date>.psx` → `<date>.files`, `<date>_4DSfM.psx` → `<date>_4DSfM.files`). `shutil` already imported at module top.
 
 ### To revert
-Restore the two-line label form:
-```python
-ax.axvline(med_before, color='steelblue', linestyle='--', linewidth=1.2,
-           label=f'before : med = {med_before:+.3f} m  std = {std_before:.3f} m')
-ax.axvline(med_after, color='tomato', linestyle='--', linewidth=1.2,
-           label=f'after  : med = {med_after:+.3f} m  std = {std_after:.3f} m')
-```
-and drop the two `ax.plot([], [], ' ', label=…)` lines.
+Remove the two `# Nuke any stale .psx + .files …` blocks in those two functions.
 
 ---
 
-## 2026-05-20 — Diagnosis: M3C2 variance is BA + ref-downsample RNG, not a code regression
+## 2026-05-21 — Fix cubic-griddata overshoot in DEM rasterisation
 
-Note (no code change). After the ECEF dedup, M3C2-before went from -1.03 m
-(May 17 baseline) to -0.31 m and M3C2-after from -0.0147 m to -0.19 m on a
-fresh run. Investigation traced the swing to two pre-existing sources of
-non-determinism, neither caused by the optimisations:
+### Problem
+DEMs built via `interpolate_and_mask` (`scipy.griddata(method='cubic')`) contained a tiny fraction (~0.2 %) of wildly out-of-range pixels — down to **−1,612,783 m** in one Changri DoD. Cause: Clough-Tocher 2-D cubic does not preserve monotonicity. At steep features (cone walls, cliff faces) the cubic polynomial swings far past either endpoint. The overshoot in the DEMs propagated 1:1 into `ref − day` DoDs.
 
-1. **Metashape BA + `buildPointCloud`** is non-deterministic on GPU. Same
-   calibration priors and image list yield clouds that differ in extent by
-   ~14 % between runs. Each wipe-and-rerun therefore feeds a noticeably
-   different cloud into ASP.
-2. **`cntp/io.py` `load_las` uses unseeded `np.random.default_rng()`**, so
-   every fresh build of `_ref_cache/Reference_UAV_TLC_PCS_ds0.40.las` picks
-   a different ~40 % subset. Downstream: different stable terrain →
-   different Stage 3 reference → different M3C2.
+Diagnostic (on the broken DOD.tif): median +0.055 m, p1/p99 ±5 m → 99.8 % of pixels were fine; only the tail was bad.
 
-Step 6b validation reads -0.0005 m (essentially zero), confirming the
-transform pipeline itself is healthy — pc_align is just finding a different
-(but consistent-with-itself) transform for the new input cloud.
+### Fix
+Clip the interpolant to the input cloud's actual Z range.
 
-User declined the proposed fix for now (seed `load_las`'s RNG so the ref
-downsample is reproducible). When/if reintroduced, the change is a single
-`seed: int | None = 42` parameter on `cntp.io.load_las`.
+`cntp/coreg.py` `interpolate_and_mask` — single line added immediately after `griddata`:
+```python
+zi = np.clip(zi, np.nanmin(z), np.nanmax(z))
+```
+Reasoning: any interpolated value outside `[min(z), max(z)]` cannot represent a real surface point in the cloud — it can only come from cubic overshoot, so capping it removes the hallucination without touching real signal.
+
+### To revert
+Remove the `np.clip(zi, np.nanmin(z), np.nanmax(z))` line in `interpolate_and_mask`. If overshoot recurs, prefer `method='linear'` (no overshoot by construction, ~3× faster on dense clouds).
+
+---
+
+## 2026-05-21 — `save_las` preserves CRS via header VLRs
+
+### Problem
+The cached downsampled reference (`_ref_cache/<ref_stem>_ds<f>.las`) had no CRS embedded — when `build_reference_dem_and_ortho` tried `laspy.open(...).header.parse_crs()` to auto-detect EPSG, it returned `None` and raised. Root cause: `save_las` built a fresh `LasHeader` with no CRS metadata.
+
+### Fix
+- `cntp/io.py` `save_las` — new optional `crs: int = None` parameter. When set, calls `header.add_crs(pyproj.CRS.from_epsg(crs))` which writes GeoTIFF VLRs into LAS 1.2 headers. Backward compatible: existing callers without `crs` still write without CRS.
+- `cntp/pipeline_4dsfm.py:191` — downsampled ref cache now written with `crs=utm_epsg`.
+- `cntp/pipeline_4dsfm.py:286` — `validated_stable.laz` also written with `crs=utm_epsg`.
+
+Two other `save_las` callsites in `cntp/asp.py` (`extract_stable_reference`, `evaluate_coreg`) left unchanged — their outputs are used only for ICP/M3C2 where CRS isn't read.
+
+**Note:** files written before this fix lack the CRS tag. Either delete and regenerate, or pass `utm_epsg` explicitly when calling downstream consumers (notebook does the latter already).
+
+### To revert
+Drop the `crs` parameter and `header.add_crs` block from `save_las`. Remove `crs=utm_epsg` from the two `cntp/pipeline_4dsfm.py` callsites.
+
+---
+
+## 2026-05-21 — DEM + orthoimage + DoD raster pipeline
+
+### What was added
+
+New raster-output stage downstream of the 4D SfM cloud pipeline:
+
+`cntp/io.py`:
+- `build_dem_and_ortho(cloud_las, ref_las, out_dir, name_stem, …)` — rasterise a coregistered cloud to a 1 m (configurable) DEM + ortho, both anchored to the reference cloud's XY bbox so every day lands on the same pixel grid. Reuses existing primitives `interpolate_and_mask` (Z) and `save_ortho` (RGB nearest-neighbour). Parameters: `res`, `max_gap_pixels`, `utm_epsg` (None ⇒ parse from LAS header), `cloud_downsample` (extra subsample at load time for OOM control), `overwrite` (skip if both TIFFs exist).
+- `build_reference_dem_and_ortho(ref_cloud_path, cache_dir, …)` — thin wrapper that fixes `name_stem="reference"` so the cached outputs always land at `<cache_dir>/reference_dem.tif` and `reference_ortho.tif`. One-time cost, cached.
+- `build_dod(ref_dem_path, day_dem_path, out_path, overwrite)` — pixel-wise `ref_dem − day_dem` on the common grid. Sanity-checks shape / transform / CRS match (which they do by construction when both DEMs come from `build_dem_and_ortho` on the same reference cloud). Writes to `<day_dem.parent>/DOD.tif` by default.
+
+`cntp/plot.py`:
+- `plot_dod_histogram(values, output_dir, title, …)` — single-distribution histogram styled like `plot_m3c2_distances`. Returns `{median, mean, std, n}` on the un-clipped data; x-axis clipped to ±3σ for visibility. Used after `build_dod` to QC the difference distribution.
+
+### Naming decisions
+- Reference rasters use the fixed stem `reference` (decision: simpler than encoding the downsample factor; the assumption is "one canonical reference per cache dir, recompute via `overwrite=True` if params change").
+- Per-day rasters use the user-supplied `name_stem` (defaulting to the date string in the notebook).
+- DoD output is `DOD.tif` (uppercase) — matches the user-stated naming convention.
+
+### Sign convention for DoD
+`ref − day`. Positive ⇒ reference surface higher than day ⇒ melt/scour if day is later than ref epoch. The sign convention was flipped from `day − ref` mid-session per user request.
+
+### Notebook + scratch file
+- `contributors/umayr/4d_sfm_dem.ipynb` — copy of `4d_sfm_pipeline.ipynb` with three new sections appended:
+  - "## DEM + Orthoimage" → reference DEM/ortho cell + per-day DEM/ortho cell
+  - "## DoD" → `build_dod` cell + `plot_dod_histogram` cell
+- Each new cell is self-contained — derives all paths from cell 3 config (`output_dir`, `new_date`, `ref_cloud`, `params`). No path strings outside cell 3.
+- `contributors/umayr/tools.py` — new scratch file mirroring marin's pattern (imports only); intended for prototyping before promotion into `cntp/`.
+
+### To revert
+Delete `build_dem_and_ortho`, `build_reference_dem_and_ortho`, `build_dod` from `cntp/io.py`. Delete `plot_dod_histogram` from `cntp/plot.py`. Remove the DEM/ortho/DoD cells from `4d_sfm_dem.ipynb` (cells 6–12 in current layout) or delete the notebook entirely. The new primitives don't touch any existing function — reverting them leaves the 4D SfM pipeline untouched.
 
 ---
 

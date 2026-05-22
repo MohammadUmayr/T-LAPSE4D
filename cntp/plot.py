@@ -106,6 +106,76 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
         plt.close(fig)
 
 
+def plot_dod_histogram(values: np.ndarray,
+                       output_dir=None,
+                       title: str = '',
+                       filename: str = "dod_histogram.png",
+                       bins: int = 60,
+                       clip_sigma: float = 3.0) -> dict:
+    """Histogram of DoD pixel values with median + std markers.
+
+    NaN pixels (outside the day's footprint, or otherwise masked) are
+    stripped before stats. The histogram x-axis is clipped to ±clip_sigma·σ
+    of the distribution so a few outliers don't squash the visible bins;
+    median/mean/std/n in the legend are from the full un-clipped array.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        DoD values, any shape — flattened internally. NaNs are ignored.
+    output_dir : str | Path, optional
+        Directory to save the PNG. When None, the figure is shown
+        interactively (in a notebook).
+    title : str
+        Trailing title text (e.g. the date).
+    filename : str
+        Output PNG filename.
+    bins : int
+        Number of histogram bins.
+    clip_sigma : float
+        Half-width of the x-axis clip in units of σ.
+
+    Returns
+    -------
+    dict
+        ``{'median', 'mean', 'std', 'n'}`` computed on the un-clipped data.
+    """
+    v = np.asarray(values).ravel()
+    v = v[np.isfinite(v)]
+
+    if v.size == 0:
+        raise ValueError("No finite values in DoD array — nothing to plot.")
+
+    med  = float(np.median(v))
+    mean = float(np.mean(v))
+    std  = float(np.std(v))
+
+    clip   = clip_sigma * std if std > 0 else 1.0
+    v_plot = np.clip(v, -clip, clip)
+
+    fig, ax = plt.subplots()
+    ax.hist(v_plot, bins=bins, color='steelblue', alpha=0.8)
+    ax.axvline(med, color='tomato', linestyle='--', linewidth=1.5,
+               label=f'median = {med:+.3f} m')
+    ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
+    ax.plot([], [], ' ', label=f'mean   = {mean:+.3f} m')
+    ax.plot([], [], ' ', label=f'std    = {std:.3f} m')
+    ax.plot([], [], ' ', label=f'n      = {v.size:,}')
+    ax.set_xlabel('DoD (m)')
+    ax.set_ylabel('Count')
+    ax.set_title(f'DoD distribution — {title}' if title else 'DoD distribution')
+    ax.legend(fontsize=9)
+    plt.tight_layout()
+
+    if output_dir is None:
+        plt.show()
+    else:
+        plt.savefig(Path(output_dir) / filename, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+    return {'median': med, 'mean': mean, 'std': std, 'n': int(v.size)}
+
+
 def plot_stable_terrain_diagnostics(stable_slope: np.ndarray,
                                      stable_final: np.ndarray,
                                      ndwi: np.ndarray,

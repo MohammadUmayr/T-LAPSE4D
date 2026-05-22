@@ -275,6 +275,12 @@ def interpolate_and_mask(x, y, z, xi, yi, res, max_gap_pixels):
     # Interpolation (cubic)
     zi = griddata((x, y), z, (xi, yi), method='cubic')
 
+    # Clough-Tocher cubic doesn't preserve monotonicity — at steep features
+    # (cliffs, cone walls) the interpolant can overshoot far beyond either
+    # endpoint. Cap to the input cloud's actual Z range so overshoots that
+    # exceed physically present elevations are pulled back in.
+    zi = np.clip(zi, np.nanmin(z), np.nanmax(z))
+
     # Distance to nearest real point
     tree = cKDTree(np.column_stack((x, y)))
     dist, _ = tree.query(np.column_stack((xi.ravel(), yi.ravel())), k=1)

@@ -58,6 +58,7 @@ def run_4dsfm_day(
     use_ecef: bool = True,
     overwrite: bool = False,
     verbose: bool = False,
+    stop_after_ba: bool = False,
 ) -> dict:
     """Run the full 4D SfM pipeline for *new_date*.
 
@@ -93,6 +94,12 @@ def run_4dsfm_day(
         exists; useful for resuming after a crash.
     verbose : bool
         Print each ``pc_align`` command and stdout.
+    stop_after_ba : bool
+        When True, run only Step 1 (multi-temporal bundle adjustment) and
+        return immediately so the user can inspect the BA outputs
+        (``4D_SfM/<date>_cameras_4DSfM.csv`` and ``4D_SfM/adjusted_calib_4DSfM/``)
+        before deciding whether to continue. Default False runs the full
+        pipeline.
 
     Returns
     -------
@@ -163,6 +170,10 @@ def run_4dsfm_day(
     else:
         print(f"[Step 1] Skipping — {cameras_4dsfm_csv.name} exists")
 
+    if stop_after_ba:
+        print(f"\n[stop_after_ba=True] Halting after Step 1.")
+        return None
+
     # ── Step 2: single-day fixed-IOP reconstruction ──────────────────────
     if overwrite or not tba_las_path.exists():
         print(f"\n[Step 2] Single-day fixed IOP — {new_date}")
@@ -188,7 +199,8 @@ def run_4dsfm_day(
     ref_cache_dir.mkdir(parents=True, exist_ok=True)
     if not ref_ds_path.exists():
         print(f"  Saving downsampled reference ({ref_downsample:.0%}) → {ref_ds_path.name}")
-        save_las(load_las(ref_cloud, downsample_factor=ref_downsample), ref_ds_path)
+        save_las(load_las(ref_cloud, downsample_factor=ref_downsample), ref_ds_path,
+                 crs=utm_epsg)
     stable_ref = extract_stable_reference(
         ref_cloud_path    = ref_ds_path,
         output_dir        = ref_cache_dir,
@@ -282,7 +294,7 @@ def run_4dsfm_day(
         _, val_stable_arr = extract_stable_terrain(val_cloud)
 
         val_dir.mkdir(parents=True, exist_ok=True)
-        save_las(val_stable_arr, validated_stable)
+        save_las(val_stable_arr, validated_stable, crs=utm_epsg)
 
         stable_tba_cloud = load_las(stable_tba_path)
         epoch_tba = py4dgeo.Epoch(stable_tba_cloud[:, :3])
