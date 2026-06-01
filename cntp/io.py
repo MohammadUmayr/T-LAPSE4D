@@ -459,8 +459,19 @@ def build_dod(
             )
         ref_arr   = ref_src.read(1).astype(np.float64)
         day_arr   = day_src.read(1).astype(np.float64)
+        ref_nodata = ref_src.nodata
+        day_nodata = day_src.nodata
         transform = day_src.transform
         crs_epsg  = day_src.crs.to_string()
+
+    # Replace numeric nodata sentinels (e.g. ASP's -9999) with NaN so the
+    # subtraction below propagates correctly. Sources already using NaN as
+    # nodata are unaffected — `arr == NaN` is False everywhere, so np.where
+    # is a no-op for them.
+    if ref_nodata is not None and not np.isnan(ref_nodata):
+        ref_arr = np.where(ref_arr == ref_nodata, np.nan, ref_arr)
+    if day_nodata is not None and not np.isnan(day_nodata):
+        day_arr = np.where(day_arr == day_nodata, np.nan, day_arr)
 
     # NaN propagates naturally — pixels with nodata in either source become NaN.
     dod = ref_arr - day_arr

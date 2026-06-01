@@ -528,8 +528,7 @@ def process_day(
             keypoint_limit=80000,
             tiepoint_limit=8000,
             generic_preselection=True,
-            reference_preselection=True,
-            reference_preselection_mode=Metashape.ReferencePreselectionSource,
+            reference_preselection=False,
         )
 
         print("  Aligning cameras (bundle adjustment) ...", flush=True)
@@ -1202,8 +1201,7 @@ def run_multitemporal_ba(
         keypoint_limit=80000,
         tiepoint_limit=8000,
         generic_preselection=True,
-        reference_preselection=True,
-        reference_preselection_mode=Metashape.ReferencePreselectionSource,
+        reference_preselection=False,
     )
 
     print("  Aligning cameras ...", flush=True)
@@ -1352,8 +1350,7 @@ def run_single_day_fixed_iop(
         keypoint_limit=80000,
         tiepoint_limit=8000,
         generic_preselection=True,
-        reference_preselection=True,
-        reference_preselection_mode=Metashape.ReferencePreselectionSource,
+        reference_preselection=False,
     )
 
     print("  Aligning cameras ...", flush=True)
