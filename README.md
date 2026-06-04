@@ -15,6 +15,25 @@ monitoring workflow can be driven from a Jupyter notebook by passing paths as va
 
 ---
 
+## Contents
+
+- [What it does](#what-it-does)
+- [Installation](#installation)
+  - [Platform support](#platform-support)
+  - [Installing the Metashape Python module](#installing-the-metashape-python-module)
+  - [Installing NASA Ames Stereo Pipeline (ASP)](#installing-nasa-ames-stereo-pipeline-asp)
+- [Quickstart](#quickstart)
+- [Inputs](#inputs)
+- [Coordinate systems](#coordinate-systems)
+- [Outputs](#outputs)
+- [Pipeline parameters](#pipeline-parameters)
+- [Module map](#module-map)
+- [Notebooks](#notebooks)
+- [License](#license)
+- [Hackathon](#hackathon)
+
+---
+
 ## What it does
 
 ![CNTP workflow — from raw time-lapse photos to per-date point clouds, DEMs, orthoimages, DoD and M3C2 change maps](docs/workflow.png)
@@ -83,8 +102,8 @@ pip install -e .
 
 | Tool | Used for | How to get it |
 |---|---|---|
-| **Agisoft Metashape** Python 3 module — **v2.3.1** | Bundle adjustment & reconstruction | Proprietary — download the wheel matching your platform (e.g. `metashape-2.3.1-…-linux_x86_64.whl`; Windows/macOS wheels also exist) from agisoft.com and `pip install` it. Set `AGISOFT_LICENSE_PATH` **before** `import cntp`. |
-| **NASA Ames Stereo Pipeline** (`pc_align`, `point2dem`) | Point-cloud co-registration + DEM rasterisation | [Install guide](https://stereopipeline.readthedocs.io/en/latest/installation.html) — **Linux/macOS only** (no Windows build; use WSL2). Must be on `PATH`. |
+| **Agisoft Metashape** Python 3 module — **v2.3.1** | Bundle adjustment & reconstruction | Proprietary — download the wheel matching your platform (e.g. `metashape-2.3.1-…-linux_x86_64.whl`; Windows/macOS wheels also exist) from agisoft.com and `pip install` it. Set `AGISOFT_LICENSE_PATH` **before** `import cntp`. **[Full steps below](#installing-the-metashape-python-module).** |
+| **NASA Ames Stereo Pipeline** (`pc_align`, `point2dem`) | Point-cloud co-registration + DEM rasterisation | **Linux/macOS only** (no Windows build; use WSL2). Must be on `PATH`. **[Full steps below](#installing-nasa-ames-stereo-pipeline-asp).** |
 | **ImageMagick** (`identify`) | Reading EXIF capture time in `homogenize_images` | Included in `environment.yml` (conda-forge). |
 
 ### Installing the Metashape Python module
@@ -286,8 +305,17 @@ instead of recomputing.
 
 ## Pipeline parameters
 
-`run_4dsfm_day` / `run_4dsfm_day_with_rasters` take the six required paths above plus
-the tunable flags below (defaults shown — most runs only set the paths).
+`run_4dsfm_day` / `run_4dsfm_day_with_rasters` take six required arguments plus the
+tunable flags below (defaults shown — most runs only set the required arguments):
+
+| Required argument | What it is |
+|---|---|
+| `new_date` | Date to process, `YYYY-MM-DD`. |
+| `tlcam_dir` | Folder of standardised time-lapse images. |
+| `ref_cloud` | Reference point cloud (UTM `.laz`). |
+| `glacier_mask` | Glacier polygon shapefile (same CRS). |
+| `registry_csv` | The reference registry built by `bootstrap_registry`. |
+| `output_dir` | Where `output_new/` is written. |
 
 **Bundle adjustment / reconstruction**
 
