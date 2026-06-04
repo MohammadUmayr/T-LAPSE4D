@@ -87,6 +87,83 @@ pip install -e .
 | **NASA Ames Stereo Pipeline** (`pc_align`, `point2dem`) | Point-cloud co-registration + DEM rasterisation | [Install guide](https://stereopipeline.readthedocs.io/en/latest/installation.html) — **Linux/macOS only** (no Windows build; use WSL2). Must be on `PATH`. |
 | **ImageMagick** (`identify`) | Reading EXIF capture time in `homogenize_images` | Included in `environment.yml` (conda-forge). |
 
+### Installing the Metashape Python module
+
+Metashape is proprietary, so it is **not** installed by `conda env create` or
+`pip install -e .` — you add it by hand from a wheel Agisoft provides:
+
+1. **Download the wheel** from [agisoft.com](https://www.agisoft.com/downloads/installer/)
+   → *Python 3 Module*. Pick the file matching your OS, e.g.
+   `metashape-2.3.1-…-linux_x86_64.whl`. On **Windows use WSL2 + the Linux
+   wheel** (see [Platform support](#platform-support)); the file can live on a
+   Windows drive and is reachable in WSL as `/mnt/<letter>/…`.
+
+2. **Install it into the activated `cntp` env**, pointing pip at the file's path:
+   ```bash
+   conda activate cntp
+   pip install /path/to/metashape-2.3.1-…-linux_x86_64.whl
+   ```
+   > The wheel is tagged `…-abi3` (Python "stable ABI"), so a wheel built for
+   > an older Python (e.g. `cp39`) also installs on newer interpreters such as
+   > 3.14 — the version in the filename does not have to match yours exactly.
+
+3. **Point it at your license** by setting `AGISOFT_LICENSE_PATH` **before** the
+   first `import Metashape` / `import cntp`. In a notebook:
+   ```python
+   import os
+   os.environ["AGISOFT_LICENSE_PATH"] = "/path/to/license.lic"
+   import Metashape   # must come after the line above
+   ```
+   or export it in the shell before launching Python/Jupyter:
+   ```bash
+   export AGISOFT_LICENSE_PATH=/path/to/license.lic
+   ```
+
+4. **Verify:** `python -c "import Metashape; print(Metashape.version)"` should
+   print `2.3.1.…` without a `libGLU.so.1` error (that library ships via the
+   `libglu` entry in `environment.yml`).
+
+### Installing NASA Ames Stereo Pipeline (ASP)
+
+ASP provides the `pc_align` (point-cloud co-registration) and `point2dem`
+(DEM rasterisation) command-line tools. It is **not** a pip package — the
+pipeline shells out to the binaries, which must be on your `PATH`.
+**Linux/macOS only** (on Windows, install it inside WSL2).
+
+Two ways to get it:
+
+- **Option A — conda (recommended; what this project uses).** Install into its
+  own env from the official channel:
+  ```bash
+  conda create -n asp -c nasa-ames-stereo-pipeline -c usgs-astrogeology -c conda-forge stereo-pipeline
+  ```
+  (tested with `stereo-pipeline 3.6.0`.)
+
+- **Option B — pre-built binary tarball.** Download the Linux/macOS build from
+  the [ASP releases](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
+  and unpack it, following the
+  [install guide](https://stereopipeline.readthedocs.io/en/latest/installation.html).
+
+**Put the tools on `PATH`.** The pipeline runs from the activated `cntp` env but
+needs the ASP binaries available *at the same time*. Because ASP lives in its
+own env/folder, add its `bin/` to `PATH` rather than `conda activate`-ing it
+(activating `asp` would deactivate `cntp`). `PATH` is just the list of folders
+your shell searches for a command, so adding ASP's `bin/` makes `pc_align` /
+`point2dem` findable. Append the line to `~/.bashrc` once (applies to every new
+terminal), then reload it:
+```bash
+# Option A (conda env) — shown; for Option B use the tarball's bin/, e.g.
+#   /opt/StereoPipeline-3.6.0/bin
+echo 'export PATH="$HOME/miniconda3/envs/asp/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc      # apply to the current terminal (new ones pick it up automatically)
+```
+
+**Verify** (with the `cntp` env active):
+```bash
+which pc_align point2dem      # both should resolve to the ASP bin/
+pc_align --version            # NASA Ames Stereo Pipeline 3.x
+```
+
 ---
 
 ## Quickstart
