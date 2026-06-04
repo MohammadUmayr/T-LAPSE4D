@@ -125,50 +125,30 @@ Metashape is proprietary, so it is **not** installed by `conda env create` or
 
 ### Installing NASA Ames Stereo Pipeline (ASP)
 
-ASP provides the `pc_align` (point-cloud co-registration) and `point2dem`
-(DEM rasterisation) command-line tools. It is **not** a pip package — the
-pipeline shells out to the binaries, which must be on your `PATH`.
-**Linux/macOS only** (on Windows, install it inside WSL2).
+ASP provides the `pc_align` and `point2dem` tools the pipeline calls.
+**Linux/macOS only** (on Windows, install inside WSL2).
 
-Two ways to get it:
+1. **Install ASP** into its own conda env:
+   ```bash
+   conda create -n asp -c nasa-ames-stereo-pipeline -c usgs-astrogeology -c conda-forge stereo-pipeline
+   ```
+   (tested with `stereo-pipeline 3.6.0`. Or download a pre-built build from the
+   [ASP releases](https://github.com/NeoGeographyToolkit/StereoPipeline/releases).)
 
-- **Option A — conda (recommended; what this project uses).** Install into its
-  own env from the official channel:
-  ```bash
-  conda create -n asp -c nasa-ames-stereo-pipeline -c usgs-astrogeology -c conda-forge stereo-pipeline
-  ```
-  (tested with `stereo-pipeline 3.6.0`.)
+2. **Add ASP to your `PATH`** so the tools are findable. Replace the path with
+   your own ASP `bin/` — the folder containing `pc_align` (find it with
+   `ls $HOME/miniconda3/envs/asp/bin/pc_align`), then run:
+   ```bash
+   echo 'export PATH="$HOME/miniconda3/envs/asp/bin:$PATH"' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+   *(macOS: use `~/.zshrc`. Tarball install: point at the tarball's `bin/`.)*
 
-- **Option B — pre-built binary tarball.** Download the Linux/macOS build from
-  the [ASP releases](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
-  and unpack it, following the
-  [install guide](https://stereopipeline.readthedocs.io/en/latest/installation.html).
-
-**Put the tools on `PATH`.** The pipeline runs from the activated `cntp` env but
-needs the ASP binaries available *at the same time*. Because ASP lives in its
-own env/folder, add its `bin/` to `PATH` rather than `conda activate`-ing it
-(activating `asp` would deactivate `cntp`). `PATH` is just the list of folders
-your shell searches for a command, so adding ASP's `bin/` makes `pc_align` /
-`point2dem` findable. Append the line to `~/.bashrc` once (applies to every new
-terminal), then reload it.
-
-**Adjust the path to your own ASP `bin/`** — the folder that contains the
-`pc_align` binary. The example below assumes a conda install at
-`$HOME/miniconda3` with the env named `asp`; change it if your conda lives
-elsewhere (`~/anaconda3`, `~/miniforge3`, …), your env has a different name, or
-you used the tarball (Option B, e.g. `/opt/StereoPipeline-3.6.0/bin`). On macOS
-the file is usually `~/.zshrc` rather than `~/.bashrc`. Find the right folder
-with `ls $HOME/miniconda3/envs/asp/bin/pc_align`.
-```bash
-echo 'export PATH="$HOME/miniconda3/envs/asp/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc      # apply to the current terminal (new ones pick it up automatically)
-```
-
-**Verify** (with the `cntp` env active):
-```bash
-which pc_align point2dem      # both should resolve to the ASP bin/
-pc_align --version            # NASA Ames Stereo Pipeline 3.x
-```
+3. **Verify** (with the `cntp` env active):
+   ```bash
+   which pc_align point2dem      # both resolve to the ASP bin/
+   pc_align --version            # NASA Ames Stereo Pipeline 3.x
+   ```
 
 ---
 
