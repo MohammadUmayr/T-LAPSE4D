@@ -17,6 +17,11 @@ dependencies:
 
   - laspy
 
+  # Provides libGLU.so.1, which the Agisoft Metashape Python module links
+  # against at import time (without it: "libGLU.so.1: cannot open shared
+  # object file"). Not pulled in by any other dependency.
+  - libglu
+
   # `identify` CLI for EXIF capture-time read in cntp.preprocess.homogenize_images
   - imagemagick
 
