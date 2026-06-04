@@ -56,6 +56,21 @@ ChangriWest_renamed/              ← point tlcam_dir here
 
 ## Installation
 
+### Platform support
+
+The `cntp` Python code is OS-independent, but the pipeline shells out to two external
+tools, and one of them sets the platform:
+
+| Platform | Status | Notes |
+|---|---|---|
+| **Linux** | Supported | Native. The reference environment. |
+| **macOS** | Should work | Both external tools ship macOS builds (untested here). |
+| **Windows** | Via **WSL2** only | **NASA Ames Stereo Pipeline has no native Windows build** — it ships Linux/macOS binaries only. Run the whole workflow inside WSL2 (Ubuntu) and install the **Linux** Metashape wheel + **Linux** ASP binaries there. A Windows drive shows up as `/mnt/<letter>` inside WSL (e.g. `/mnt/g`). |
+
+So in practice this is a **Linux / macOS / Windows-via-WSL2** library. Agisoft Metashape
+itself *does* offer a native Windows wheel, but ASP does not — which is why the install
+steps below reference the Linux wheel.
+
 ```bash
 git clone git@github.com:MohammadUmayr/CNTP_hackathon.git
 cd ./CNTP_hackathon
@@ -68,8 +83,8 @@ pip install -e .
 
 | Tool | Used for | How to get it |
 |---|---|---|
-| **Agisoft Metashape** Python 3 module — **v2.3.1** | Bundle adjustment & reconstruction | Proprietary — download the matching Linux wheel (`metashape-2.3.1-…-linux_x86_64.whl`) from agisoft.com and `pip install` it. Set `AGISOFT_LICENSE_PATH` **before** `import cntp`. |
-| **NASA Ames Stereo Pipeline** (`pc_align`, `point2dem`) | Point-cloud co-registration + DEM rasterisation | [Install guide](https://stereopipeline.readthedocs.io/en/latest/installation.html) — must be on `PATH`. |
+| **Agisoft Metashape** Python 3 module — **v2.3.1** | Bundle adjustment & reconstruction | Proprietary — download the wheel matching your platform (e.g. `metashape-2.3.1-…-linux_x86_64.whl`; Windows/macOS wheels also exist) from agisoft.com and `pip install` it. Set `AGISOFT_LICENSE_PATH` **before** `import cntp`. |
+| **NASA Ames Stereo Pipeline** (`pc_align`, `point2dem`) | Point-cloud co-registration + DEM rasterisation | [Install guide](https://stereopipeline.readthedocs.io/en/latest/installation.html) — **Linux/macOS only** (no Windows build; use WSL2). Must be on `PATH`. |
 | **ImageMagick** (`identify`) | Reading EXIF capture time in `homogenize_images` | Included in `environment.yml` (conda-forge). |
 
 ---
