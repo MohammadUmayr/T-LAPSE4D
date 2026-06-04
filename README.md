@@ -224,7 +224,7 @@ the tunable flags below (defaults shown — most runs only set the paths).
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `match_downscale` | `0` | Metashape `matchPhotos` image downscale: `0` = 2× upscale (most tie points, slowest), `1` = full res, `2`/`4`/`8` = ½/¼/⅛ (faster, fewer points). |
+| `match_downscale` | `1` | Metashape `matchPhotos` image downscale: `0` = 2× upscale (most tie points, slowest), `1` = full res, `2`/`4`/`8` = ½/¼/⅛ (faster, fewer points). |
 | `depth_downscale` | `2` | Metashape `buildDepthMaps` downscale: `1` = full res (slow), `2` = ½ (default), `4`/`8`/`16` = coarser & faster. |
 | `loc_acc_new` | `(0.5, 0.5, 0.5)` | Position accuracy prior (m) for the new-day cameras — `(x, y, z)`. |
 | `rot_acc_new` | `(5.0, 5.0, 5.0)` | Rotation accuracy prior (°) for the new-day cameras — `(yaw, pitch, roll)`. |

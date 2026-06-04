@@ -46,7 +46,7 @@ def run_4dsfm_day(
     glacier_mask: Path,
     registry_csv: Path,
     output_dir: Path,
-    match_downscale: int = 0,
+    match_downscale: int = 1,
     depth_downscale: int = 2,
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
@@ -378,7 +378,7 @@ def run_4dsfm_day_with_rasters(
     registry_csv: Path,
     output_dir: Path,
     # ── SfM pipeline kwargs (forwarded to run_4dsfm_day) ──────────────────
-    match_downscale: int = 0,
+    match_downscale: int = 1,
     depth_downscale: int = 2,
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
