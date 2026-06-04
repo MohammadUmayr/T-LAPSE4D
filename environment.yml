@@ -13,10 +13,12 @@ dependencies:
   - nb_conda_kernels
   - htop
   - tree
+  - pytest          # run the test suite under tests/
 
   - laspy
-  - openpyxl
-  - opencv
+
+  # `identify` CLI for EXIF capture-time read in cntp.preprocess.homogenize_images
+  - imagemagick
 
   - pip
   - pip:

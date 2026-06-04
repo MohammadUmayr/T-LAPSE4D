@@ -1,7 +1,5 @@
 import numpy as np
 import py4dgeo
-from scipy.interpolate import griddata
-from scipy.spatial import cKDTree
 
 # NDWI vs intensity separation line constants
 _NDWI_A = -150 / 0.25   # slope
@@ -271,23 +269,3 @@ def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
     }
 
 
-def interpolate_and_mask(x, y, z, xi, yi, res, max_gap_pixels):
-    # Interpolation (cubic)
-    zi = griddata((x, y), z, (xi, yi), method='cubic')
-
-    # Clough-Tocher cubic doesn't preserve monotonicity — at steep features
-    # (cliffs, cone walls) the interpolant can overshoot far beyond either
-    # endpoint. Cap to the input cloud's actual Z range so overshoots that
-    # exceed physically present elevations are pulled back in.
-    zi = np.clip(zi, np.nanmin(z), np.nanmax(z))
-
-    # Distance to nearest real point
-    tree = cKDTree(np.column_stack((x, y)))
-    dist, _ = tree.query(np.column_stack((xi.ravel(), yi.ravel())), k=1)
-    dist = dist.reshape(xi.shape)
-
-    # Mask far pixels
-    mask = dist > (max_gap_pixels * res)
-    zi_masked = np.where(mask, np.nan, zi)
-
-    return zi_masked

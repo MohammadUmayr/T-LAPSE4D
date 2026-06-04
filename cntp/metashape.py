@@ -1,49 +1,21 @@
 """
-Metashape time-lapse multi-camera processing pipeline.
+Metashape SfM engine for the 4D time-lapse pipeline.
 
-All processing logic is exposed as plain Python functions so the pipeline
-can be driven from a Jupyter notebook by passing paths as variables:
+Thin Python wrappers around the Agisoft Metashape API that drive the
+multi-temporal bundle adjustment, single-day fixed-IOP reconstruction,
+sensor/calibration setup, and post-coregistration camera updates. They are
+orchestrated per date by :mod:`cntp.pipeline_4dsfm` (``run_4dsfm_day``); the
+reference registry that feeds them is built by :func:`bootstrap_registry`.
 
-    from cntp.metashape import run_pipeline
-
-    run_pipeline(
-        tlcam_dir  = "TLCAM/",
-        calib_dir  = "Calib_IOP/",
-        reference  = "ref.xlsx",
-        output_dir = "output/",
-        dates      = None,          # None → all dates found
-    )
-
-Expected on-disk layout
------------------------
-  TLCAM/
-    C1_renamed/   C1_YYYY-MM-DD_HHMMSS.JPG  ...
-    C2_renamed/   ...
-    C3_renamed/
-    C4_renamed/
-    C5_renamed/
-  Calib_IOP/
-    C1.xml  C2.xml  C3.xml  C4.xml  C5.xml   (Metashape XML format)
-  ref.xlsx          columns: Label, Lon, Lat, Alt,
-                              xAcc, yAcc, zAcc,
-                              yaw, pitch, roll,
-                              yawAcc, pitchAcc, rollAcc
-
-Outputs (per day, inside  output_dir/YYYY-MM-DD/)
--------------------------------------------------
-  YYYY-MM-DD.psx           Metashape project
-  YYYY-MM-DD_cloud.laz     point cloud in UTM (EPSG auto-detected)
-  YYYY-MM-DD_cameras.csv   estimated camera positions in WGS84
-  adjusted_calib/C1.xml …  optimised intrinsics per camera (Metashape XML)
+Metashape is an optional runtime dependency, imported lazily inside the
+functions that need it, so this module (and non-Metashape helpers like
+:func:`discover_images`) imports cleanly without a license.
 """
 
 from __future__ import annotations
 
-import io
-import os
 import re
 import shutil
-import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -62,11 +34,34 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 
-CAMERAS = ["C1", "C2", "C3", "C4", "C5"]
-
+# A standardised time-lapse image filename is
+#   <camera>_<YYYY-MM-DD>_<HHMMSS>.<ext>     e.g.  C7_2023-11-27_083000.JPG
+# The camera id is everything before the first underscore, so *any* naming
+# works (C1..C10, CAM1, EastRidge, …) as long as the id has no underscore.
+# Camera ids are read from the data on disk — never hardcoded — so a new site
+# needs no code change, only its own renamer (or already-standard filenames)
+# producing this pattern. See cntp.preprocess.homogenize_images.
 _IMG_RE = re.compile(
-    r"^(C[1-5])_(\d{4}-\d{2}-\d{2})_\d{6}\.(jpg|jpeg|JPG|JPEG)$"
+    r"^(?P<cam>[^_]+)_(?P<date>\d{4}-\d{2}-\d{2})_\d{6}\.(?:jpg|jpeg|JPG|JPEG)$"
 )
+
+# Same shape without the file extension, for matching Metashape camera /
+# sensor *labels* (which usually carry no extension). Used to tell genuine
+# time-lapse photos apart from drone/UAV images sharing a project — the
+# drone's labels (e.g. "DJI_0457") don't match this shape.
+_LABEL_RE = re.compile(r"^[^_]+_\d{4}-\d{2}-\d{2}_\d{6}$")
+
+
+def is_timelapse_label(label: object) -> bool:
+    """Return True if *label* looks like a standardised time-lapse photo.
+
+    A genuine time-lapse image/sensor label has the shape
+    ``<camera>_<YYYY-MM-DD>_<HHMMSS>`` (optionally with a file extension).
+    Drone/UAV images mixed into the same Metashape project — e.g.
+    ``DJI_0457`` — don't match, so this is the data-driven replacement for the
+    old hardcoded ``CAMERAS`` whitelist when filtering them out.
+    """
+    return bool(_LABEL_RE.match(Path(str(label)).stem))
 
 
 # ---------------------------------------------------------------------------
@@ -103,99 +98,32 @@ def _utm_epsg(lon: float) -> int:
 # ---------------------------------------------------------------------------
 
 def discover_images(tlcam_dir: str | Path) -> dict[str, dict[str, list[Path]]]:
-    """Scan camera sub-directories and return ``{date: {camera: [paths]}}``.
+    """Scan *tlcam_dir* recursively and return ``{date: {camera: [paths]}}``.
+
+    The camera id and date are read from each standardised filename
+    (``<camera>_<YYYY-MM-DD>_<HHMMSS>.<ext>``), so the on-disk folder layout is
+    irrelevant — ``C6_renamed/``, ``C6/``, or all images in one folder all
+    work. Files that don't match the pattern (drone shots, ``notes.jpg``, …)
+    are ignored.
 
     Parameters
     ----------
     tlcam_dir : str | Path
-        Root directory containing ``C1_renamed/``, ``C2_renamed/``, …
+        Any directory (searched recursively) holding standardised time-lapse
+        images. See :func:`cntp.preprocess.homogenize_images` to produce them.
     """
     tlcam_dir = Path(tlcam_dir)
     by_date: dict = defaultdict(lambda: defaultdict(list))
-    for cam in CAMERAS:
-        cam_dir = tlcam_dir / f"{cam}_renamed"
-        if not cam_dir.is_dir():
-            continue
-        for img in sorted(cam_dir.iterdir()):
-            m = _IMG_RE.match(img.name)
-            if m:
-                cam_label, date = m.group(1), m.group(2)
-                by_date[date][cam_label].append(img)
+    # Match on the filename only — no per-entry is_file() stat. The strict
+    # `<cam>_<date>_<time>.<ext>` pattern already excludes directories, and on
+    # network/drvfs mounts (e.g. /mnt/g) a stat per file is ~1000x slower than
+    # the name match (200 s vs 0.2 s for ~16k files).
+    for img in sorted(tlcam_dir.rglob("*")):
+        m = _IMG_RE.match(img.name)
+        if m:
+            by_date[m.group("date")][m.group("cam")].append(img)
 
     return {d: dict(cams) for d, cams in sorted(by_date.items())}
-
-
-# ---------------------------------------------------------------------------
-# Reference helpers
-# ---------------------------------------------------------------------------
-
-def load_reference(ref_path: str | Path) -> pd.DataFrame:
-    """Load the per-camera reference Excel file.
-
-    Expected columns (case-insensitive, spaces stripped):
-      Label, Lon, Lat, Alt, xAcc, yAcc, zAcc,
-      yaw, pitch, roll, yawAcc, pitchAcc, rollAcc
-    """
-    df = pd.read_excel(Path(ref_path))
-    df.columns = df.columns.str.strip()
-
-    # Build a case-insensitive → canonical name mapping
-    _std = ["label", "lon", "lat", "alt",
-            "xacc", "yacc", "zacc",
-            "yaw", "pitch", "roll",
-            "yawacc", "pitchacc", "rollacc"]
-    col_map = {}
-    for col in df.columns:
-        low = col.lower().replace(" ", "").replace("_", "")
-        if low in _std:
-            col_map[col] = low
-
-    df = df.rename(columns=col_map)
-    df["label"] = df["label"].astype(str).str.strip()
-    return df
-
-
-def _build_image_ref_csv(
-    date: str,
-    date_images: dict[str, list[Path]],
-    ref_df: pd.DataFrame,
-    out_dir: Path,
-) -> Path:
-    """Expand the 5-row camera reference into one row per image.
-
-    Every image from camera Cx inherits Cx's position and orientation.
-    The label column uses the image filename stem so Metashape can match it.
-    """
-    rows = []
-    for cam, paths in date_images.items():
-        cam_row = ref_df[ref_df["label"].str.upper() == cam.upper()]
-        if cam_row.empty:
-            raise ValueError(
-                f"Camera '{cam}' not found in reference file. "
-                f"Available labels: {list(ref_df['label'])}"
-            )
-        r = cam_row.iloc[0]
-        for img_path in paths:
-            rows.append({
-                "label":    img_path.stem,
-                "lon":      r["lon"],
-                "lat":      r["lat"],
-                "alt":      r["alt"],
-                "xacc":     r["xacc"],
-                "yacc":     r["yacc"],
-                "zacc":     r["zacc"],
-                "yaw":      r["yaw"],
-                "pitch":    r["pitch"],
-                "roll":     r["roll"],
-                "yawacc":   r["yawacc"],
-                "pitchacc": r["pitchacc"],
-                "rollacc":  r["rollacc"],
-            })
-
-    csv_path = out_dir / f"ref_{date}.csv"
-    # No header — importReference uses the columns string to interpret columns
-    pd.DataFrame(rows).to_csv(csv_path, index=False, header=False)
-    return csv_path
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +166,7 @@ def _setup_sensors(
         sensor.fixed_calibration = True in the Metashape GUI).
     """
     sensors: dict = {}
-    for cam in CAMERAS:
-        if cam not in calib_xmls:
-            continue
+    for cam in sorted(calib_xmls):
         calib = load_calib_xml(calib_xmls[cam])
         sensor = chunk.addSensor()
         sensor.label             = cam
@@ -251,55 +177,6 @@ def _setup_sensors(
         sensor.fixed_calibration = fixed_calibration
         sensors[cam] = sensor
     return sensors
-
-
-def _set_camera_references(
-    chunk: "Metashape.Chunk",
-    date_images: dict[str, list[Path]],
-    ref_df: pd.DataFrame,
-    wgs84_crs: "Metashape.CoordinateSystem",
-) -> None:
-    """Set camera reference positions/orientations directly on each camera object.
-
-    Avoids importReference label-matching by building a stem→reference lookup
-    and assigning directly via the Metashape Python API.
-    """
-    # Build {filename_stem: reference_row} lookup
-    ref_lookup: dict = {}
-    for cam, paths in date_images.items():
-        cam_row = ref_df[ref_df["label"].str.upper() == cam.upper()]
-        if cam_row.empty:
-            continue
-        r = cam_row.iloc[0]
-        for img_path in paths:
-            ref_lookup[img_path.stem] = r
-
-    chunk.crs = wgs84_crs
-    matched = 0
-    for camera in chunk.cameras:
-        r = ref_lookup.get(camera.label)
-        if r is not None:
-            camera.reference.location = Metashape.Vector(
-                [float(r["lon"]), float(r["lat"]), float(r["alt"])]
-            )
-            camera.reference.location_accuracy = Metashape.Vector(
-                [float(r["xacc"]), float(r["yacc"]), float(r["zacc"])]
-            )
-            camera.reference.rotation = Metashape.Vector(
-                [float(r["yaw"]), float(r["pitch"]), float(r["roll"])]
-            )
-            camera.reference.rotation_accuracy = Metashape.Vector(
-                [float(r["yawacc"]), float(r["pitchacc"]), float(r["rollacc"])]
-            )
-            camera.reference.enabled          = True
-            camera.reference.rotation_enabled = True
-            matched += 1
-
-    print(f"  Set reference       : {matched}/{len(chunk.cameras)} cameras matched", flush=True)
-    if matched == 0:
-        sample = [c.label for c in chunk.cameras[:3]]
-        print(f"  DEBUG camera labels : {sample}", flush=True)
-        print(f"  DEBUG lookup keys   : {list(ref_lookup.keys())[:3]}", flush=True)
 
 
 def _assign_sensors(
@@ -343,17 +220,26 @@ def _assign_camera_groups(
 # Export helpers
 # ---------------------------------------------------------------------------
 
-def _export_camera_csv(chunk: "Metashape.Chunk", out_path: Path) -> None:
+def _export_camera_csv(chunk: "Metashape.Chunk", out_path: Path, keep=None) -> None:
     """Export estimated camera positions and orientations to a WGS84 CSV.
 
     Follows the HSFM approach: position from chunk.crs.project(T.mulp(camera.center)),
     Yaw/Pitch/Roll from Metashape.utils.mat2ypr with the local geographic frame.
+
+    Parameters
+    ----------
+    keep : callable, optional
+        Predicate ``label -> bool``. When given, only cameras whose label
+        satisfies it are exported — used to drop drone/UAV images via
+        :func:`is_timelapse_label`. Default exports every aligned camera.
     """
     T = chunk.transform.matrix
     rows = []
 
     for cam in chunk.cameras:
         if cam.transform is None:
+            continue
+        if keep is not None and not keep(cam.label):
             continue
         try:
             lon, lat, alt = chunk.crs.project(T.mulp(cam.center))
@@ -400,310 +286,6 @@ def _export_calib_xml(
 
 
 # ---------------------------------------------------------------------------
-# Per-day processing
-# ---------------------------------------------------------------------------
-
-def process_day(
-    date: str,
-    date_images: dict[str, list[Path]],
-    ref_df: pd.DataFrame,
-    calib_xmls: dict[str, Path],
-    output_dir: Path,
-    utm_epsg: int,
-    match_downscale: int = 1,
-    depth_downscale: int = 2,
-    stop_after_alignment: bool = False,
-    resume: bool = False,
-) -> None:
-    """Run the full Metashape pipeline for a single calendar day.
-
-    Parameters
-    ----------
-    date : str
-        Date string ``YYYY-MM-DD``.
-    date_images : dict
-        ``{camera_label: [image_paths]}`` for this day.
-    ref_df : pd.DataFrame
-        Per-camera reference table from :func:`load_reference`.
-    calib_xmls : dict
-        ``{camera_label: Path}`` mapping to Metashape XML calibration files.
-    output_dir : Path
-        Root output directory.  A ``date/`` sub-directory is created here.
-    utm_epsg : int
-        EPSG code for the UTM zone used when exporting the LAZ.
-    match_downscale : int
-        Controls the image resolution used during key-point detection and
-        matching (``matchPhotos`` ``downscale`` argument).
-
-        === ========= ==============================================
-        0   Highest   2× upscaled  — most tie points, very slow
-        1   High      Original resolution (default)
-        2   Medium    ½ resolution
-        4   Low       ¼ resolution
-        8   Lowest    ⅛ resolution — fewest tie points, fastest
-        === ========= ==============================================
-
-    depth_downscale : int
-        Controls the image resolution used when building depth maps
-        (``buildDepthMaps`` ``downscale`` argument).
-
-        === =========== ===========================================
-        1   Ultra High  Full resolution — very slow
-        2   High        ½ resolution    — good balance (default)
-        4   Medium      ¼ resolution
-        8   Low         ⅛ resolution
-        16  Lowest      1/16 resolution — fastest
-        === =========== ===========================================
-
-    resume : bool
-        When ``True``, open the existing ``.psx`` (which must already contain
-        aligned cameras) and skip straight to ``buildDepthMaps`` →
-        ``buildPointCloud`` → exports.  The project is **not** deleted or
-        re-created.  Raises ``RuntimeError`` if the ``.psx`` is missing or no
-        cameras are aligned.
-    """
-    if Metashape is None:
-        raise ImportError("Metashape Python module is not installed.")
-
-    n_imgs = sum(len(v) for v in date_images.values())
-    print(f"\n{'='*60}", flush=True)
-    print(f"  Date : {date}   ({n_imgs} images across {len(date_images)} cameras)", flush=True)
-    print(f"{'='*60}", flush=True)
-
-    day_dir  = output_dir / "output" / date
-    day_dir.mkdir(parents=True, exist_ok=True)
-    psx_path = day_dir / f"{date}.psx"
-
-    doc = Metashape.Document()
-
-    if resume:
-        # ── Resume: open existing aligned project ─────────────────────────
-        if not psx_path.exists():
-            raise RuntimeError(
-                f"resume=True but no project found at {psx_path}. "
-                "Run without resume=True first to complete alignment."
-            )
-        doc.open(str(psx_path), read_only=False, ignore_lock=True)
-        chunk   = doc.chunk
-        sensors = {s.label: s for s in chunk.sensors}
-        aligned = sum(1 for c in chunk.cameras if c.transform)
-        if aligned == 0:
-            raise RuntimeError(
-                f"resume=True but no cameras are aligned in {psx_path.name}. "
-                "Re-run without resume=True to redo alignment."
-            )
-        print(f"  Resumed project     : {psx_path.name}  ({aligned} cameras already aligned)", flush=True)
-    else:
-        # ── Fresh run: delete old project and start from scratch ──────────
-        psx_files_dir = day_dir / f"{date}.files"
-        if psx_files_dir.exists():
-            shutil.rmtree(psx_files_dir, ignore_errors=True)
-        if psx_path.exists():
-            psx_path.unlink(missing_ok=True)
-
-        doc.save(str(psx_path))
-        chunk = doc.addChunk()
-        chunk.label = date
-
-        # ── Photos ────────────────────────────────────────────────────────
-        all_images = [str(p) for imgs in date_images.values() for p in imgs]
-        chunk.addPhotos(all_images)
-        print(f"  Added {len(all_images)} photos", flush=True)
-
-        # ── Sensors + camera groups ───────────────────────────────────────
-        sensors = _setup_sensors(chunk, calib_xmls)
-        _assign_sensors(chunk, sensors)
-        groups = _setup_camera_groups(chunk, date_images)
-        _assign_camera_groups(chunk, groups)
-        print(f"  Configured {len(sensors)} sensors / {len(groups)} camera groups", flush=True)
-
-        # ── Reference ─────────────────────────────────────────────────────
-        wgs84_crs = Metashape.CoordinateSystem("EPSG::4326")
-        _set_camera_references(chunk, date_images, ref_df, wgs84_crs)
-
-        # ── Bundle adjustment ─────────────────────────────────────────────
-        print("  Matching photos ...", flush=True)
-        chunk.matchPhotos(
-            downscale=match_downscale,
-            keypoint_limit=80000,
-            tiepoint_limit=8000,
-            generic_preselection=True,
-            reference_preselection=False,
-        )
-
-        print("  Aligning cameras (bundle adjustment) ...", flush=True)
-        chunk.alignCameras(adaptive_fitting=False)
-        doc.save()
-
-        aligned = sum(1 for c in chunk.cameras if c.transform)
-        print(f"  Aligned {aligned}/{len(chunk.cameras)} cameras", flush=True)
-        if aligned == 0:
-            print(f"  WARNING: no cameras aligned for {date}, skipping exports.", flush=True)
-            return
-
-        print("  Optimising camera alignment ...", flush=True)
-        chunk.optimizeCameras(
-            fit_f=True,
-            fit_cx=True,
-            fit_cy=True,
-            fit_k1=True,
-            fit_k2=True,
-            fit_k3=True,
-            fit_k4=False,
-            fit_p1=True,
-            fit_p2=True,
-            fit_b1=False,
-            fit_b2=False,
-            adaptive_fitting=False,
-            tiepoint_covariance=True,
-        )
-        doc.save()
-
-        if stop_after_alignment:
-            print(f"  Stopped after alignment (stop_after_alignment=True)", flush=True)
-            print(f"  Project saved : {psx_path.name}", flush=True)
-            return
-
-    # ── Dense point cloud ─────────────────────────────────────────────────
-    print("  Building depth maps ...", flush=True)
-    chunk.buildDepthMaps(
-        downscale=depth_downscale,
-        filter_mode=Metashape.MildFiltering,
-    )
-    print("  Building point cloud ...", flush=True)
-    chunk.buildPointCloud()
-    doc.save()
-
-    # ── Exports ───────────────────────────────────────────────────────────
-    laz_path = day_dir / f"{date}_cloud.laz"
-    utm_crs  = Metashape.CoordinateSystem(f"EPSG::{utm_epsg}")
-    chunk.exportPointCloud(
-        str(laz_path),
-        source_data=Metashape.PointCloudData,
-        format=Metashape.PointCloudFormatLAS,
-        crs=utm_crs,
-        save_point_color=True,
-    )
-    print(f"  Exported LAZ        : {laz_path.name}  (EPSG:{utm_epsg})", flush=True)
-
-    _export_camera_csv(chunk, day_dir / f"{date}_cameras.csv")
-    _export_calib_xml(sensors, day_dir / "adjusted_calib")
-
-    doc.save()
-    print(f"  Project saved       : {psx_path.name}", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# Pipeline entry point (call from Jupyter notebook)
-# ---------------------------------------------------------------------------
-
-def run_pipeline(
-    tlcam_dir:  str | Path,
-    calib_dir:  str | Path,
-    reference:  str | Path,
-    output_dir: str | Path,
-    dates:      list[str] | None = None,
-    match_downscale: int = 1,
-    depth_downscale: int = 2,
-    stop_after_alignment: bool = False,
-    resume: bool = False,
-) -> None:
-    """Process all (or selected) days in the time-lapse dataset.
-
-    Parameters
-    ----------
-    tlcam_dir : str | Path
-        Root containing ``C1_renamed/``, ``C2_renamed/``, …
-    calib_dir : str | Path
-        Directory containing ``C1.txt`` … ``C5.txt``.
-    reference : str | Path
-        Excel file with per-camera WGS84 positions and orientations.
-    output_dir : str | Path
-        Root output directory.
-    dates : list[str] | None
-        If given, process only these dates (``YYYY-MM-DD``).
-        If None, all dates found in *tlcam_dir* are processed.
-    match_downscale : int
-        Controls the image resolution used during key-point detection and
-        matching (``matchPhotos`` ``downscale`` argument).
-
-        === ========= ==============================================
-        0   Highest   2× upscaled  — most tie points, very slow
-        1   High      Original resolution (default)
-        2   Medium    ½ resolution
-        4   Low       ¼ resolution
-        8   Lowest    ⅛ resolution — fewest tie points, fastest
-        === ========= ==============================================
-
-    depth_downscale : int
-        Controls the image resolution used when building depth maps
-        (``buildDepthMaps`` ``downscale`` argument).
-
-        === =========== ===========================================
-        1   Ultra High  Full resolution — very slow
-        2   High        ½ resolution    — good balance (default)
-        4   Medium      ¼ resolution
-        8   Low         ⅛ resolution
-        16  Lowest      1/16 resolution — fastest
-        === =========== ===========================================
-    """
-    tlcam_dir  = Path(tlcam_dir)
-    calib_dir  = Path(calib_dir)
-    reference  = Path(reference)
-    output_dir = Path(output_dir)
-
-    # ── Load calibrations ─────────────────────────────────────────────────
-    calib_xmls: dict[str, Path] = {}
-    for cam in CAMERAS:
-        xml_file = calib_dir / f"{cam}.xml"
-        if xml_file.exists():
-            calib_xmls[cam] = xml_file
-            print(f"Loaded calibration : {xml_file.name}", flush=True)
-        else:
-            print(f"WARNING: {xml_file} not found — {cam} will use Metashape defaults", flush=True)
-
-    # ── Load reference ────────────────────────────────────────────────────
-    ref_df = load_reference(reference)
-    print(f"Loaded reference   : {len(ref_df)} camera entries from {reference.name}", flush=True)
-
-    # Auto-detect UTM zone from mean longitude
-    mean_lon = ref_df["lon"].mean()
-    utm_epsg = _utm_epsg(mean_lon)
-    print(f"UTM EPSG           : EPSG:{utm_epsg}  (mean lon = {mean_lon:.3f}°)", flush=True)
-
-    # ── Discover images ───────────────────────────────────────────────────
-    by_date = discover_images(tlcam_dir)
-    if not by_date:
-        raise RuntimeError(f"No images matched the expected naming pattern under {tlcam_dir}")
-
-    if dates is not None:
-        by_date = {d: v for d, v in by_date.items() if d in dates}
-        if not by_date:
-            raise ValueError(f"None of the requested dates {dates} were found.")
-
-    print(f"Dates to process   : {list(by_date.keys())}\n", flush=True)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── Process each day ──────────────────────────────────────────────────
-    for date, date_images in by_date.items():
-        process_day(
-            date=date,
-            date_images=date_images,
-            ref_df=ref_df,
-            calib_xmls=calib_xmls,
-            output_dir=output_dir,
-            utm_epsg=utm_epsg,
-            match_downscale=match_downscale,
-            depth_downscale=depth_downscale,
-            stop_after_alignment=stop_after_alignment,
-            resume=resume,
-        )
-
-    print("\nAll dates processed.", flush=True)
-
-
-# ---------------------------------------------------------------------------
 # Co-registration camera import  (run after ASP pc_align)
 # ---------------------------------------------------------------------------
 
@@ -714,7 +296,8 @@ def update_metashape_cameras_after_transform(
 ) -> None:
     """Apply an ASP pc_align ECEF transform directly to the Metashape chunk transform.
 
-    Workflow: run_pipeline → ASP pc_align (use_ecef=True) → this function.
+    Workflow: single-day reconstruction → ASP pc_align (use_ecef=True) → this
+    function (driven per date by :func:`cntp.pipeline_4dsfm.run_4dsfm_day`).
 
     Reads the 4×4 rigid-body transform from *transform_path* (Stage 3
     ``run-transform.txt``, which contains the full composed T3∘T2∘T1) and
@@ -916,10 +499,8 @@ def _setup_sensors_multitemporal(
 
     for date, grp in reg_df.groupby("date"):
         calib_dir = Path(grp["calib_dir"].iloc[0])
-        for cam in CAMERAS:
-            ref_xml = calib_dir / f"{cam}.xml"
-            if not ref_xml.exists():
-                continue
+        for ref_xml in sorted(calib_dir.glob("*.xml")):
+            cam = ref_xml.stem
             calib = load_calib_xml(ref_xml)
             s = chunk.addSensor()
             s.label             = f"{cam}_{date}"
@@ -930,7 +511,7 @@ def _setup_sensors_multitemporal(
             s.fixed_calibration = True
             ref_sensors[(cam, date)] = s
 
-    for cam in CAMERAS:
+    for cam in sorted(new_calib_xmls):
         new_xml = new_calib_xmls.get(cam)
         if new_xml and Path(new_xml).exists():
             calib = load_calib_xml(new_xml)
@@ -1042,6 +623,188 @@ def update_registry(
           f"{len(combined)} total)")
 
 
+def bootstrap_registry(
+    ref_psx: str | Path,
+    chunk_label: str,
+    ref_date: str,
+    output_dir: str | Path,
+    registry_csv: str | Path,
+    cameras_csv_out: str | Path = None,
+    calib_dir_out: str | Path = None,
+    ref_cloud_out: str | Path = None,
+    export_ref_cloud: bool = True,
+    overwrite: bool = False,
+) -> dict:
+    """Initialise the reference registry from an existing reference project.
+
+    One-time, per-glacier setup. Opens a finished reference Metashape project,
+    pulls out the time-lapse cameras' interior orientation (calibration XMLs)
+    and exterior orientation (position + yaw/pitch/roll), exports the dense
+    **reference point cloud** (UTM ``.laz``), and writes the registry so the
+    per-day 4D SfM pipeline can run afterwards. Replaces the old standalone
+    ``bootstrap_registry.ipynb`` — call this once from the main notebook instead.
+
+    Drone/UAV images sharing the project are skipped automatically via the
+    standardised-filename test :func:`is_timelapse_label` (no camera list to
+    maintain).
+
+    Parameters
+    ----------
+    ref_psx : str | Path
+        Path to the reference ``.psx`` project.
+    chunk_label : str
+        Exact label of the chunk to read (as shown in Metashape's workspace).
+    ref_date : str
+        Date (``YYYY-MM-DD``) of the reference day.
+    output_dir : str | Path
+        Root output directory (parent of ``output_new/``), matching the value
+        used by the per-day pipeline.
+    registry_csv : str | Path
+        Registry CSV to create.
+    cameras_csv_out, calib_dir_out : str | Path, optional
+        Where to write the reference day's camera CSV and calibration XMLs.
+        Default ``output_dir/output_new/<ref_date>/4D_SfM/…`` — the location
+        the pipeline expects.
+    ref_cloud_out : str | Path, optional
+        Where to write the reference point cloud (``.laz``, exported from the
+        chunk's dense cloud in UTM). Default ``output_dir/output_new/reference.laz``.
+        This is the ``ref_cloud`` the per-day pipeline co-registers against.
+    export_ref_cloud : bool
+        When True (default), also export the dense reference point cloud. Set
+        False to only (re)build the registry + calibrations.
+    overwrite : bool
+        When False (default) and *registry_csv* already exists, do nothing and
+        return — so re-running the setup cell is harmless. True rebuilds.
+
+    Returns
+    -------
+    dict
+        ``registry_csv, cameras_csv, calib_dir, ref_cloud, n_cameras, n_sensors,
+        cameras``.
+    """
+    if Metashape is None:
+        raise ImportError(
+            "Metashape Python module is not installed (or AGISOFT_LICENSE_PATH "
+            "was not set before `import cntp`)."
+        )
+
+    ref_psx      = Path(ref_psx)
+    output_dir   = Path(output_dir)
+    registry_csv = Path(registry_csv)
+
+    if registry_csv.exists() and not overwrite:
+        print(f"Registry already exists — skipping bootstrap: {registry_csv}")
+        print("  (pass overwrite=True to rebuild)")
+        return {
+            "registry_csv": registry_csv, "cameras_csv": cameras_csv_out,
+            "calib_dir": calib_dir_out, "ref_cloud": None, "n_cameras": None,
+            "n_sensors": None, "cameras": None,
+        }
+
+    ref_export_dir = output_dir / "output_new" / ref_date / "4D_SfM"
+    if cameras_csv_out is None:
+        cameras_csv_out = ref_export_dir / f"{ref_date}_cameras_4DSfM.csv"
+    if calib_dir_out is None:
+        calib_dir_out = ref_export_dir / "adjusted_calib_4DSfM"
+    cameras_csv_out = Path(cameras_csv_out)
+    calib_dir_out   = Path(calib_dir_out)
+    cameras_csv_out.parent.mkdir(parents=True, exist_ok=True)
+    calib_dir_out.mkdir(parents=True, exist_ok=True)
+    registry_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── Open project + select chunk ──────────────────────────────────────
+    doc = Metashape.Document()
+    doc.open(str(ref_psx), read_only=True, ignore_lock=True)
+    chunk = next((c for c in doc.chunks if c.label == chunk_label), None)
+    if chunk is None:
+        available = [c.label for c in doc.chunks]
+        raise ValueError(f"Chunk '{chunk_label}' not found. Available: {available}")
+    aligned = sum(1 for c in chunk.cameras if c.transform)
+    print(f"Chunk   : '{chunk.label}'  ({aligned}/{len(chunk.cameras)} aligned)")
+
+    # ── Exterior orientation (EOP) — time-lapse cameras only ─────────────
+    _export_camera_csv(chunk, cameras_csv_out, keep=is_timelapse_label)
+
+    # Valid camera ids = prefixes of the standardised photos. Used to keep the
+    # matching sensors and drop the drone sensor (whose prefix never appears).
+    valid_cams = {
+        _camera_prefix(c.label)
+        for c in chunk.cameras
+        if is_timelapse_label(c.label)
+    }
+
+    # ── Interior orientation (IOP) — matching sensors only ───────────────
+    exported = []
+    for sensor in chunk.sensors:
+        cam = sensor.label.split("_")[0]
+        if cam not in valid_cams:
+            print(f"  Skipping sensor : {sensor.label}")
+            continue
+        out_path = calib_dir_out / f"{cam}.xml"
+        sensor.calibration.save(str(out_path), format=Metashape.CalibrationFormatXML)
+        exported.append(cam)
+        print(f"  Exported calibration : {out_path.name}")
+
+    # ── Reconstruct date_images from photo paths ─────────────────────────
+    date_images: dict = defaultdict(list)
+    missing = 0
+    for cam in chunk.cameras:
+        if not is_timelapse_label(cam.label):
+            continue
+        if cam.photo is None or not cam.photo.path:
+            missing += 1
+            continue
+        date_images[_camera_prefix(cam.label)].append(Path(cam.photo.path))
+    date_images = dict(date_images)
+    if missing:
+        print(f"  WARNING: {missing} time-lapse cameras had no photo path")
+
+    # ── Write registry ───────────────────────────────────────────────────
+    update_registry(
+        registry_csv      = registry_csv,
+        date              = ref_date,
+        date_images       = date_images,
+        cameras_coreg_csv = cameras_csv_out,
+        calib_dir         = calib_dir_out,
+    )
+
+    # ── Reference point cloud (chunk dense cloud → UTM .laz) ──────────────
+    # Exported as .laz (compressed) to match the existing reference cloud, so
+    # the per-day `ref_cloud` path stays unchanged.
+    ref_cloud_path = None
+    if export_ref_cloud:
+        cloud_out = (Path(ref_cloud_out) if ref_cloud_out is not None
+                     else output_dir / "output_new" / "reference.laz")
+        cloud_out.parent.mkdir(parents=True, exist_ok=True)
+        if cloud_out.exists() and not overwrite:
+            print(f"  Reference cloud exists — skipping export: {cloud_out.name}")
+        else:
+            # UTM zone from the time-lapse cameras' mean longitude — the same
+            # zone run_4dsfm_day derives from the registry, so the per-day clouds
+            # co-register against this cloud in a matching CRS.
+            mean_lon = pd.read_csv(cameras_csv_out)["Lon"].mean()
+            utm_epsg = _utm_epsg(mean_lon)
+            chunk.exportPointCloud(
+                str(cloud_out),
+                source_data      = Metashape.PointCloudData,
+                format           = Metashape.PointCloudFormatLAZ,
+                crs              = Metashape.CoordinateSystem(f"EPSG::{utm_epsg}"),
+                save_point_color = True,
+            )
+            print(f"  Exported reference cloud : {cloud_out.name}  (EPSG:{utm_epsg}, .laz)")
+        ref_cloud_path = cloud_out
+
+    return {
+        "registry_csv": registry_csv,
+        "cameras_csv":  cameras_csv_out,
+        "calib_dir":    calib_dir_out,
+        "ref_cloud":    ref_cloud_path,
+        "n_cameras":    len(date_images),
+        "n_sensors":    len(set(exported)),
+        "cameras":      sorted(valid_cams),
+    }
+
+
 # ---------------------------------------------------------------------------
 # 4D SfM pipeline — multi-temporal bundle adjustment
 # ---------------------------------------------------------------------------
@@ -1112,15 +875,14 @@ def run_multitemporal_ba(
 
     # Load new-day sensor IOP from last registry day's validated calibration.
     last_calib_dir = Path(reg_df["calib_dir"].iloc[-1])
-    new_calib_xmls: dict = {}
-    for cam in CAMERAS:
-        refined_xml = last_calib_dir / f"{cam}.xml"
-        if not refined_xml.exists():
-            raise FileNotFoundError(
-                f"Calibration XML for {cam} not found in last registry calib dir: "
-                f"{last_calib_dir}. Re-run bootstrap_registry or update_registry."
-            )
-        new_calib_xmls[cam] = refined_xml
+    new_calib_xmls: dict = {
+        xml.stem: xml for xml in sorted(last_calib_dir.glob("*.xml"))
+    }
+    if not new_calib_xmls:
+        raise FileNotFoundError(
+            f"No calibration XMLs found in last registry calib dir: "
+            f"{last_calib_dir}. Re-run bootstrap_registry or update_registry."
+        )
 
     # ── Build project ─────────────────────────────────────────────────────
     # Nuke any stale .psx + .files from a prior crashed run. Without this,
@@ -1150,7 +912,7 @@ def run_multitemporal_ba(
     )
     _assign_sensors_multitemporal(chunk, ref_sensors, new_sensors, date)
     n_ref_days = reg_df["date"].nunique()
-    print(f"  Sensors : {n_ref_days} ref days × {len(CAMERAS)} cameras (fixed IOP) "
+    print(f"  Sensors : {n_ref_days} ref days × {len(new_calib_xmls)} cameras (fixed IOP) "
           f"+ {len(new_sensors)} new (floating IOP)")
 
     # ── Camera groups (by camera prefix) ──────────────────────────────────
@@ -1306,9 +1068,7 @@ def run_single_day_fixed_iop(
     print(f"{'='*60}", flush=True)
 
     calib_xmls = {
-        cam: calib_dir / f"{cam}.xml"
-        for cam in CAMERAS
-        if (calib_dir / f"{cam}.xml").exists()
+        xml.stem: xml for xml in sorted(calib_dir.glob("*.xml"))
     }
 
     # ── Build project ─────────────────────────────────────────────────────

@@ -59,6 +59,7 @@ def run_4dsfm_day(
     overwrite: bool = False,
     verbose: bool = False,
     stop_after_ba: bool = False,
+    add_to_registry: bool = True,
 ) -> dict:
     """Run the full 4D SfM pipeline for *new_date*.
 
@@ -100,6 +101,15 @@ def run_4dsfm_day(
         (``4D_SfM/<date>_cameras_4DSfM.csv`` and ``4D_SfM/adjusted_calib_4DSfM/``)
         before deciding whether to continue. Default False runs the full
         pipeline.
+    add_to_registry : bool
+        When True (default), Step 7 appends the day's validated cameras to
+        the reference registry CSV so future multi-temporal BA runs in Step 1
+        bundle-adjust against them. Set False to keep the registry frozen
+        at its current state — useful when the day's coreg is shaky and you
+        don't want to pollute the reference baseline that downstream dates
+        will read. All other steps (1–6 + 6b) still run normally, so the
+        DEM / ortho / DoD / M3C2 outputs for this date are produced
+        regardless.
 
     Returns
     -------
@@ -171,7 +181,7 @@ def run_4dsfm_day(
         print(f"[Step 1] Skipping — {cameras_4dsfm_csv.name} exists")
 
     if stop_after_ba:
-        print(f"\n[stop_after_ba=True] Halting after Step 1.")
+        print("\n[stop_after_ba=True] Halting after Step 1.")
         return None
 
     # ── Step 2: single-day fixed-IOP reconstruction ──────────────────────
@@ -247,7 +257,7 @@ def run_4dsfm_day(
         coreg_med_after  = eval_result["med_after"]
         coreg_std_after  = eval_result["std_after"]
     else:
-        print(f"[Step 3b] Skipping — stable TBA exists")
+        print("[Step 3b] Skipping — stable TBA exists")
 
     # ── Step 4: apply transform to camera EOPs ───────────────────────────
     if overwrite or not cameras_coreg_csv.exists():
@@ -325,18 +335,21 @@ def run_4dsfm_day(
         print(f"[Step 6b] Skipping — {validated_stable.name} exists")
 
     # ── Step 7: update reference registry ────────────────────────────────
-    reg_df_fresh = pd.read_csv(registry_csv)
-    if new_date not in reg_df_fresh["date"].astype(str).values:
-        print(f"\n[Step 7] Update registry — {new_date}")
-        update_registry(
-            registry_csv      = registry_csv,
-            date              = new_date,
-            date_images       = date_images,
-            cameras_coreg_csv = cameras_coreg_csv,
-            calib_dir         = calib_dir_out,
-        )
+    if not add_to_registry:
+        print("\n[Step 7] Skipping — add_to_registry=False (registry kept frozen)")
     else:
-        print(f"[Step 7] Skipping — {new_date} already in registry")
+        reg_df_fresh = pd.read_csv(registry_csv)
+        if new_date not in reg_df_fresh["date"].astype(str).values:
+            print(f"\n[Step 7] Update registry — {new_date}")
+            update_registry(
+                registry_csv      = registry_csv,
+                date              = new_date,
+                date_images       = date_images,
+                cameras_coreg_csv = cameras_coreg_csv,
+                calib_dir         = calib_dir_out,
+            )
+        else:
+            print(f"[Step 7] Skipping — {new_date} already in registry")
 
     return {
         "date":              new_date,
@@ -350,4 +363,263 @@ def run_4dsfm_day(
         "coreg_std_after":   coreg_std_after,
         "validation_med":    validation_med,
         "validation_std":    validation_std,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Per-date orchestrator: 4D SfM pipeline + DEM / ortho / DoD / stable / M3C2 raster
+# ---------------------------------------------------------------------------
+
+def run_4dsfm_day_with_rasters(
+    new_date: str,
+    tlcam_dir: Path,
+    ref_cloud: Path,
+    glacier_mask: Path,
+    registry_csv: Path,
+    output_dir: Path,
+    # ── SfM pipeline kwargs (forwarded to run_4dsfm_day) ──────────────────
+    match_downscale: int = 0,
+    depth_downscale: int = 2,
+    loc_acc_new: tuple = (0.5, 0.5, 0.5),
+    rot_acc_new: tuple = (5.0, 5.0, 5.0),
+    ref_downsample: float = 0.4,
+    tba_downsample: float = 1.0,
+    p2p_max_disp: float = 10.0,
+    sp2p_max_disp: float = 5.0,
+    m_sp2p_max_disp: float = 2.0,
+    use_ecef: bool = True,
+    overwrite: bool = False,
+    verbose: bool = False,
+    add_to_registry: bool = True,
+    # ── Raster knobs ──────────────────────────────────────────────────────
+    res: float = 1.0,
+    max_gap_pixels: int = 1,
+    ref_cloud_downsample: float = 0.25,
+    m3c2_ref_downsample: float = 0.25,
+    slope_threshold: float = 60.0,
+    utm_epsg: int = None,
+    overwrite_ref_dem: bool = False,
+    overwrite_day_dem: bool = False,
+    overwrite_dod: bool = False,
+    overwrite_stable: bool = False,
+    overwrite_stable_dod: bool = False,
+    overwrite_m3c2: bool = False,
+) -> dict:
+    """Run 4D SfM Steps 1–7 + build every per-date raster output.
+
+    Wrapper that bundles :func:`run_4dsfm_day` with the per-date raster
+    pipeline (DEM + orthoimage + DoD + stable-terrain DoD + M3C2 raster,
+    each with its histogram PNG). Intended as the single library entry
+    point that a minimal batch notebook (see ``4d_sfm_dem_monthly.ipynb``)
+    calls in a loop.
+
+    Outputs (all under ``<output_dir>/output_new/<new_date>/single_day/``
+    unless otherwise noted):
+
+    - ``<date>_dem.tif`` + ``<date>_ortho.tif`` (per-day DEM + ortho)
+    - ``DOD.tif`` + ``dod_histogram.png``
+    - ``<date>_dem_stable.tif`` + ``DOD_stable.tif`` + ``dod_stable_histogram.png``
+    - ``M3C2_raster.tif`` + ``m3c2_raster_histogram.png``
+
+    The shared reference rasters land in ``<output_dir>/output_new/_ref_cache/``
+    (built once, skipped on subsequent dates):
+
+    - ``reference_dem.tif`` + ``reference_ortho.tif``
+    - ``reference_dem_stable.tif``
+
+    Parameters
+    ----------
+    new_date, tlcam_dir, ref_cloud, glacier_mask, registry_csv, output_dir :
+        See :func:`run_4dsfm_day`.
+    match_downscale, depth_downscale, loc_acc_new, rot_acc_new, ref_downsample,
+    tba_downsample, p2p_max_disp, sp2p_max_disp, m_sp2p_max_disp, use_ecef,
+    overwrite, verbose, add_to_registry :
+        Forwarded to :func:`run_4dsfm_day`.
+    res : float
+        Output raster pixel size in metres. Default 1.0.
+    max_gap_pixels : int
+        Forwarded to :func:`cntp.raster.build_dem_and_ortho`.
+    ref_cloud_downsample : float
+        Extra load-time downsample fed to ``griddata`` when building the
+        reference DEM. Default 0.25.
+    m3c2_ref_downsample : float
+        Load-time downsample for the reference cloud fed to py4dgeo's M3C2
+        KDTree. Default 0.25 (matches the typical 50 M-pt cache → ~12.5 M
+        corepoints; keeps M3C2 runtime/memory tractable).
+    slope_threshold : float
+        Stable-terrain slope cutoff [°]. Default 60.
+    utm_epsg : int, optional
+        EPSG code for the raster CRS. When ``None``, parsed from
+        ``ref_cloud``'s LAS header.
+    overwrite_ref_dem, overwrite_day_dem, overwrite_dod, overwrite_stable,
+    overwrite_stable_dod, overwrite_m3c2 :
+        Per-raster overwrite flags. Default ``False`` skips if the file is
+        on disk.
+
+    Returns
+    -------
+    dict
+        ``{"date": str, "sfm": <run_4dsfm_day result>, "dod_stats": dict,
+        "stable_stats": dict, "m3c2_stats": dict}``. Each ``*_stats`` dict
+        comes from :func:`cntp.plot.plot_dod_histogram` and contains
+        ``median``, ``mean``, ``std``, ``n`` over finite raster pixels.
+    """
+    # Local imports — rasterio / laspy / cntp.raster / cntp.plot are not
+    # needed by callers of `run_4dsfm_day` alone, so we keep them off the
+    # module's hot import path.
+    import laspy
+    import rasterio
+    from cntp.raster import (
+        build_reference_dem_and_ortho,
+        build_dem_and_ortho,
+        build_dod,
+        extract_stable_terrain_from_dem,
+        m3c2_to_raster,
+    )
+    from cntp.plot import plot_dod_histogram
+
+    output_dir   = Path(output_dir)
+    ref_cloud    = Path(ref_cloud)
+    registry_csv = Path(registry_csv)
+
+    # ── Step 1–7: 4D SfM pipeline ────────────────────────────────────────
+    sfm_result = run_4dsfm_day(
+        new_date        = new_date,
+        tlcam_dir       = tlcam_dir,
+        ref_cloud       = ref_cloud,
+        glacier_mask    = glacier_mask,
+        registry_csv    = registry_csv,
+        output_dir      = output_dir,
+        match_downscale = match_downscale,
+        depth_downscale = depth_downscale,
+        loc_acc_new     = loc_acc_new,
+        rot_acc_new     = rot_acc_new,
+        ref_downsample  = ref_downsample,
+        tba_downsample  = tba_downsample,
+        p2p_max_disp    = p2p_max_disp,
+        sp2p_max_disp   = sp2p_max_disp,
+        m_sp2p_max_disp = m_sp2p_max_disp,
+        use_ecef        = use_ecef,
+        overwrite       = overwrite,
+        verbose         = verbose,
+        add_to_registry = add_to_registry,
+    )
+
+    # ── Resolve shared paths + CRS ───────────────────────────────────────
+    day_dir       = output_dir / "output_new" / new_date
+    aligned_las   = day_dir / "coreg" / f"{new_date}_cloud_coreg_hsfm.las"
+    single_day    = day_dir / "single_day"
+    ref_cache_dir = output_dir / "output_new" / "_ref_cache"
+    ref_ds_path   = ref_cache_dir / f"{ref_cloud.stem}_ds{ref_downsample:.2f}.las"
+    ref_input     = ref_ds_path if ref_ds_path.exists() else ref_cloud
+
+    if utm_epsg is None:
+        with laspy.open(ref_cloud) as _f:
+            utm_epsg = _f.header.parse_crs().to_epsg()
+
+    # ── Reference DEM + ortho (cached, built once across dates) ──────────
+    ref_dem, ref_ortho = build_reference_dem_and_ortho(
+        ref_cloud_path   = ref_input,
+        cache_dir        = ref_cache_dir,
+        res              = res,
+        max_gap_pixels   = max_gap_pixels,
+        utm_epsg         = utm_epsg,
+        cloud_downsample = ref_cloud_downsample,
+        overwrite        = overwrite_ref_dem,
+    )
+
+    # ── Per-day DEM + ortho ──────────────────────────────────────────────
+    dem, ortho = build_dem_and_ortho(
+        cloud_las        = aligned_las,
+        ref_las          = ref_cloud,
+        out_dir          = single_day,
+        name_stem        = new_date,
+        res              = res,
+        max_gap_pixels   = max_gap_pixels,
+        utm_epsg         = utm_epsg,
+        cloud_downsample = tba_downsample,
+        overwrite        = overwrite_day_dem,
+    )
+
+    # ── DoD + histogram ──────────────────────────────────────────────────
+    dod_path = build_dod(
+        ref_dem_path = ref_dem,
+        day_dem_path = dem,
+        out_path     = single_day / "DOD.tif",
+        overwrite    = overwrite_dod,
+    )
+    with rasterio.open(dod_path) as src:
+        dod_values = src.read(1)
+    dod_stats = plot_dod_histogram(
+        dod_values,
+        output_dir = single_day,
+        title      = f"DoD — {new_date}",
+        filename   = "dod_histogram.png",
+    )
+
+    # ── Stable-terrain DoD + histogram ───────────────────────────────────
+    ref_ortho_path = ref_cache_dir / "reference_ortho.tif"
+    day_ortho_path = single_day    / f"{new_date}_ortho.tif"
+    ref_stable_dem = extract_stable_terrain_from_dem(
+        dem_path          = ref_dem,
+        ortho_path        = ref_ortho_path,
+        glacier_mask_path = glacier_mask,
+        slope_threshold   = slope_threshold,
+        overwrite         = overwrite_stable,
+    )
+    day_stable_dem = extract_stable_terrain_from_dem(
+        dem_path          = dem,
+        ortho_path        = day_ortho_path,
+        glacier_mask_path = glacier_mask,
+        slope_threshold   = slope_threshold,
+        overwrite         = overwrite_stable,
+    )
+    stable_dod_path = build_dod(
+        ref_dem_path = ref_stable_dem,
+        day_dem_path = day_stable_dem,
+        out_path     = single_day / "DOD_stable.tif",
+        overwrite    = overwrite_stable_dod,
+    )
+    with rasterio.open(stable_dod_path) as src:
+        stable_dod_values = src.read(1)
+    stable_stats = plot_dod_histogram(
+        stable_dod_values,
+        output_dir = single_day,
+        title      = f"stable DoD — {new_date}",
+        filename   = "dod_stable_histogram.png",
+    )
+
+    # ── M3C2 distance raster + histogram ─────────────────────────────────
+    m3c2_raster_path = m3c2_to_raster(
+        ref_las         = ref_ds_path if ref_ds_path.exists() else ref_cloud,
+        day_las         = aligned_las,
+        out_path        = single_day / "M3C2_raster.tif",
+        grid_anchor_las = ref_cloud,
+        res             = res,
+        utm_epsg        = utm_epsg,
+        ref_downsample  = m3c2_ref_downsample,
+        day_downsample  = 1.0,
+        overwrite       = overwrite_m3c2,
+    )
+    with rasterio.open(m3c2_raster_path) as src:
+        m3c2_values = src.read(1)
+    m3c2_stats = plot_dod_histogram(
+        m3c2_values,
+        output_dir = single_day,
+        title      = f"M3C2 raster — {new_date}",
+        filename   = "m3c2_raster_histogram.png",
+    )
+
+    print(
+        f"\n  [{new_date}] DoD med={dod_stats['median']:+.3f} m  |  "
+        f"stable med={stable_stats['median']:+.3f} m  |  "
+        f"M3C2 med={m3c2_stats['median']:+.3f} m"
+    )
+
+    return {
+        "date":         new_date,
+        "sfm":          sfm_result,
+        "dod_stats":    dod_stats,
+        "stable_stats": stable_stats,
+        "m3c2_stats":   m3c2_stats,
     }
