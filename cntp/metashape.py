@@ -18,17 +18,23 @@ import re
 import shutil
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
-# Metashape is an optional runtime dependency; imported lazily inside
-# functions so the module can be imported for unit-testing without it.
-try:
+# Metashape is an optional runtime dependency, so the module can be imported
+# (e.g. for the non-Metashape helpers, or unit tests) without it installed.
+# The TYPE_CHECKING branch lets the type checker resolve `Metashape.*` type
+# annotations; without it the runtime `Metashape = None` fallback makes
+# `Metashape` look like a variable ("Variable not allowed in type expression").
+if TYPE_CHECKING:
     import Metashape
-except ImportError:
-    Metashape = None  # type: ignore
+else:
+    try:
+        import Metashape
+    except ImportError:
+        Metashape = None
 
 # ---------------------------------------------------------------------------
 # Constants

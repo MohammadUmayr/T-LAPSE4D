@@ -26,7 +26,7 @@ import pandas as pd
 import py4dgeo
 from pyproj import Transformer
 from cntp.coreg import extract_stable_terrain, run_m3c2, _NDWI_A, _NDWI_B
-from cntp.io import load_las, apply_glacier_mask, save_las
+from cntp.io import load_las, apply_glacier_mask, save_las, read_las_bounds
 from cntp.plot import plot_stable_terrain_diagnostics, plot_m3c2_distances
 
 
@@ -898,3 +898,129 @@ def evaluate_coreg(
         med_after=med_a,  std_after=std_a,  dist_after=dist_a,
         stable_tba_after=after_stable,
     )
+
+
+# ---------------------------------------------------------------------------
+# DEM rasterisation
+# ---------------------------------------------------------------------------
+
+def point2dem(
+    cloud_las: str | Path,
+    out_prefix: str | Path = None,
+    res: float = 1.0,
+    utm_epsg: int = None,
+    max_gap_pixels: int = 1,
+    nodata: float = -9999.0,
+    ref_las: str | Path = None,
+    extra_args: tuple = (),
+    verbose: bool = False,
+) -> Path:
+    """Wrap ASP's ``point2dem`` CLI to rasterise a LAS cloud into a DEM.
+
+    Thin wrapper around the same Ames Stereo Pipeline binary that
+    :func:`pc_align_p2p_sp2p` already requires. ``point2dem`` is streaming and
+    multi-threaded: no Python-side RAM blow-up, no Delaunay triangulation, no
+    Clough-Tocher overshoot. Per-pixel binning + median aggregation, written
+    straight to a GeoTIFF. Not used by the 4D-SfM pipeline (which rasterises
+    via :func:`cntp.raster.build_dem_and_ortho`), but kept here as a faster,
+    lower-memory alternative for ad-hoc DEM generation.
+
+    Parameters
+    ----------
+    cloud_las : str | Path
+        Input LAS/LAZ point cloud (e.g. a coregistered cloud).
+    out_prefix : str | Path, optional
+        ASP output prefix passed to ``-o``. The DEM lands at
+        ``<out_prefix>-DEM.tif`` (ASP appends the suffix). Default
+        ``<cloud_dir>/<cloud_stem>``.
+    res : float
+        Output pixel size (``--tr``). Default 1.0 m.
+    utm_epsg : int, optional
+        EPSG code for ``--t_srs``. When ``None``, read from ``cloud_las``'s
+        LAS header.
+    max_gap_pixels : int
+        Maps to ASP ``--search-radius-factor``: pixels farther than
+        ``max_gap_pixels * res`` from any cloud point produce nodata.
+        Default 1 (same convention as
+        :func:`cntp.raster.build_dem_and_ortho`).
+    nodata : float
+        ASP ``--nodata-value``. Default -9999.
+    ref_las : str | Path, optional
+        When set, the output grid is anchored to *ref_las*'s XY bounding box
+        (read from header — no points loaded) via ASP
+        ``--t_projwin xmin ymin xmax ymax`` (ASP convention — lower-left +
+        upper-right, NOT GDAL's upper-left/lower-right). Mirrors
+        :func:`cntp.raster.build_dem_and_ortho`'s ``ref_las`` argument so the
+        ASP DEM lands on the same footprint as the scipy DEM and the two can
+        be differenced without resampling. Default ``None`` ⇒ ASP derives the
+        grid from the input cloud's own bounding box.
+    extra_args : tuple
+        Additional CLI flags appended verbatim, e.g.
+        ``("--remove-outliers", "--max-valid-triangulation-error", "5")``.
+    verbose : bool
+        Print the assembled CLI and ASP's stdout.
+
+    Returns
+    -------
+    Path
+        Path to ``<out_prefix>-DEM.tif``.
+    """
+    if shutil.which("point2dem") is None:
+        raise RuntimeError(
+            "point2dem not found on PATH.\n"
+            "Install NASA Ames Stereo Pipeline:\n"
+            "  https://stereopipeline.readthedocs.io/en/latest/installation.html"
+        )
+
+    cloud_las = Path(cloud_las)
+    if out_prefix is None:
+        out_prefix = cloud_las.parent / cloud_las.stem
+    out_prefix = Path(out_prefix)
+    out_prefix.parent.mkdir(parents=True, exist_ok=True)
+
+    if utm_epsg is None:
+        with laspy.open(cloud_las) as f:
+            crs = f.header.parse_crs()
+        if crs is None or crs.to_epsg() is None:
+            raise ValueError(
+                f"No EPSG in {cloud_las.name} header; pass utm_epsg explicitly."
+            )
+        utm_epsg = crs.to_epsg()
+
+    threads = os.cpu_count() or 1
+
+    cmd = [
+        "point2dem",
+        "--threads", str(threads),
+        "--tr", str(res),
+        "--t_srs", f"EPSG:{utm_epsg}",
+        "--search-radius-factor", str(max_gap_pixels),
+        "--nodata-value", str(nodata),
+        "-o", str(out_prefix),
+    ]
+    if ref_las is not None:
+        ref_min, ref_max = read_las_bounds(ref_las)
+        # Defensive min/max — the LAS spec doesn't require header.mins <=
+        # header.maxs, so some writers store them reversed (we hit this with
+        # Reference_UAV_TLC_PCS.laz, whose header has Y min > Y max → a
+        # degenerate projwin → empty DEM).
+        x0, x1 = float(ref_min[0]), float(ref_max[0])
+        y0, y1 = float(ref_min[1]), float(ref_max[1])
+        xmin, xmax = min(x0, x1), max(x0, x1)
+        ymin, ymax = min(y0, y1), max(y0, y1)
+        # ASP convention: --t_projwin xmin ymin xmax ymax (lower-left +
+        # upper-right). Different from GDAL's --projwin ulx uly lrx lry.
+        cmd.extend(["--t_projwin", str(xmin), str(ymin), str(xmax), str(ymax)])
+    cmd.extend(str(a) for a in extra_args)
+    cmd.append(str(cloud_las))
+
+    _run_command(cmd, verbose=verbose)
+
+    dem_path = out_prefix.parent / f"{out_prefix.name}-DEM.tif"
+    if not dem_path.exists():
+        raise RuntimeError(
+            f"point2dem completed but expected output {dem_path} not found."
+        )
+    if verbose:
+        print(f"  ASP DEM → {dem_path}")
+    return dem_path
