@@ -150,10 +150,16 @@ own env/folder, add its `bin/` to `PATH` rather than `conda activate`-ing it
 (activating `asp` would deactivate `cntp`). `PATH` is just the list of folders
 your shell searches for a command, so adding ASP's `bin/` makes `pc_align` /
 `point2dem` findable. Append the line to `~/.bashrc` once (applies to every new
-terminal), then reload it:
+terminal), then reload it.
+
+**Adjust the path to your own ASP `bin/`** — the folder that contains the
+`pc_align` binary. The example below assumes a conda install at
+`$HOME/miniconda3` with the env named `asp`; change it if your conda lives
+elsewhere (`~/anaconda3`, `~/miniforge3`, …), your env has a different name, or
+you used the tarball (Option B, e.g. `/opt/StereoPipeline-3.6.0/bin`). On macOS
+the file is usually `~/.zshrc` rather than `~/.bashrc`. Find the right folder
+with `ls $HOME/miniconda3/envs/asp/bin/pc_align`.
 ```bash
-# Option A (conda env) — shown; for Option B use the tarball's bin/, e.g.
-#   /opt/StereoPipeline-3.6.0/bin
 echo 'export PATH="$HOME/miniconda3/envs/asp/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc      # apply to the current terminal (new ones pick it up automatically)
 ```
