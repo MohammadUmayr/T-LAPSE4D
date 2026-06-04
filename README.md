@@ -185,6 +185,12 @@ bootstrap_registry(
 )
 ```
 
+> **Note —** step **(a)** is only needed to *produce* the standard filename format
+> from messy raw images. If your images already follow
+> `<camera>_<YYYY-MM-DD>_<HHMMSS>.jpg`, skip it and set `tlcam_dir` to the folder
+> directly. (`ensure_standardized` is also safe to call either way — it's a no-op
+> when the images are already standard.)
+
 ### 2. Process a date
 
 ```python
