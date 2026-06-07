@@ -133,7 +133,7 @@ itself *does* offer a native Windows wheel, but ASP does not — which is why th
 steps below reference the Linux wheel.
 
 ```bash
-git clone git@github.com:MohammadUmayr/CNTP_hackathon.git
+git clone --branch v0.1.0 git@github.com:MohammadUmayr/CNTP_hackathon.git
 cd ./CNTP_hackathon
 conda env create -f environment.yml
 conda activate cntp
