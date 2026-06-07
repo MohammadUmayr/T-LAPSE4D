@@ -18,6 +18,7 @@ monitoring workflow can be driven from a Jupyter notebook by passing paths as va
 ## Contents
 
 - [What it does](#what-it-does)
+- [Workflow](#workflow)
 - [Installation](#installation)
   - [Platform support](#platform-support)
   - [Installing the Metashape Python module](#installing-the-metashape-python-module)
@@ -70,6 +71,47 @@ ChangriWest_renamed/              ← point tlcam_dir here
 > **Note —** the standardise step (`homogenize_images` / `ensure_standardized`) is only
 > needed to **produce** this format from messy raw images. If your images already follow
 > the pattern above, skip it entirely and point `tlcam_dir` straight at the folder.
+
+---
+
+## Workflow
+
+![CNTP pipeline — inputs, one-time setup, the seven-step per-date pipeline, and the per-date outputs, with the 4D-SfM feedback loop](docs/workflow_diagram.png)
+
+The library turns **fixed time-lapse photos of a glacier into co-registered 3-D
+point clouds, DEMs, and surface-change maps**. The diagram above reads
+left-to-right in four zones:
+
+- **Inputs** — standardised time-lapse images (`camera_date_time.JPG`), a
+  GCP-aligned **reference point cloud** (UTM), the **registry CSV** (per-camera
+  extrinsics/EOP + intrinsics/IOP), and a **glacier mask** separating glacier
+  from stable terrain.
+- **One-time setup** (once per glacier) — standardise raw images, build a
+  GCP-referenced reference cloud and calibrate the camera intrinsics in
+  Metashape (manual), then `bootstrap_registry` exports the reference cloud and
+  builds the registry CSV.
+- **Per-date pipeline** — the seven steps run for each new date:
+  1. **Multi-temporal bundle adjustment** (Metashape) — refine the new day's
+     camera extrinsics (EOP) against the registry.
+  2. **Single-day reconstruction** (Metashape) — reconstruct the day's point
+     cloud with fixed intrinsics (IOP).
+  3. **3-stage ICP co-registration in ECEF** (ASP `pc_align`) — align the day
+     cloud onto the **stable off-glacier terrain** (the glacier itself moves and
+     melts, so alignment is done on what does *not* change).
+  4. **Evaluate co-registration** — M3C2 against the stable reference.
+  5. **Apply the alignment transform** to the camera extrinsics (EOP).
+  6. **Rebuild + validate** the co-registered cloud (Metashape; M3C2 check).
+  7. **Update the registry** with the validated cameras — which feeds back into
+     step 1, so **each processed date grows the multi-temporal baseline** (the
+     "4D" in 4D-SfM).
+- **Outputs** (per date, GeoTIFF / LAZ) — co-registered point cloud, DEM +
+  orthoimage, **DoD** (`day − reference`; gain/loss), **stable-terrain DoD**
+  (co-registration accuracy check, ≈ 0), and the slope-aware **M3C2** change
+  raster.
+
+Two external engines do the heavy lifting: **Agisoft Metashape**
+(Structure-from-Motion & reconstruction) and the **NASA Ames Stereo Pipeline**
+(co-registration & DEM rasterisation).
 
 ---
 
