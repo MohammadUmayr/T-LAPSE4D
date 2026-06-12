@@ -338,11 +338,11 @@ the point clouds must be in a projected, metre-based CRS (not raw lon/lat degree
 
 ## Outputs
 
-Everything lands under `<output_dir>/output_new/`. The reference products are built
+Everything lands under `<output_dir>/output/`. The reference products are built
 **once** and shared; everything else is **per date**:
 
 ```
-<output_dir>/output_new/
+<output_dir>/output/
 │
 ├── _ref_cache/                          shared reference artefacts (built once, reused for every date)
 │   ├── reference_dem.tif                reference DEM …
@@ -398,7 +398,7 @@ tunable flags below (defaults shown — most runs only set the required argument
 | `ref_cloud` | Reference point cloud (UTM `.laz`). |
 | `glacier_mask` | Glacier polygon shapefile (same CRS). |
 | `registry_csv` | The reference registry built by `bootstrap_registry`. |
-| `output_dir` | Where `output_new/` is written. |
+| `output_dir` | Where `output/` is written. |
 
 **Bundle adjustment / reconstruction**
 
