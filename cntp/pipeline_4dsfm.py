@@ -60,6 +60,7 @@ def run_4dsfm_day(
     verbose: bool = False,
     stop_after_ba: bool = False,
     add_to_registry: bool = True,
+    run_validation: bool = True,
 ) -> dict:
     """Run the full 4D SfM pipeline for *new_date*.
 
@@ -77,7 +78,7 @@ def run_4dsfm_day(
         Reference registry CSV managed by :func:`cntp.metashape.update_registry`.
         The UTM zone is derived from the mean ``lon`` column.
     output_dir : Path
-        Root output directory (parent of ``output_new/``).
+        Root output directory (parent of ``output/``).
     match_downscale, depth_downscale : int
         Metashape ``matchPhotos`` and ``buildDepthMaps`` downscales.
     loc_acc_new, rot_acc_new : tuple
@@ -110,6 +111,14 @@ def run_4dsfm_day(
         will read. All other steps (1–6 + 6b) still run normally, so the
         DEM / ortho / DoD / M3C2 outputs for this date are produced
         regardless.
+    run_validation : bool
+        When True (default), run Step 6 (Metashape rebuild of the co-registered
+        cloud) + Step 6b (M3C2 validation that the ASP transform propagated).
+        Set False to skip both — the rasters use the Step 3 coreg cloud
+        (``aligned_las``), not the rebuilt ``validated_laz``, and with the
+        registry frozen nothing else consumes it, so validation is dead weight.
+        The coreg M3C2 plot (Step 3b) is independent and always runs. When
+        skipped, ``validation_med`` / ``validation_std`` stay NaN.
 
     Returns
     -------
@@ -122,7 +131,7 @@ def run_4dsfm_day(
     ref_cloud    = Path(ref_cloud)
     registry_csv = Path(registry_csv)
 
-    date_dir   = output_dir / "output_new" / new_date
+    date_dir   = output_dir / "output" / new_date
     sfm_dir    = date_dir / "4D_SfM"
     single_dir = date_dir / "single_day"
     coreg_dir  = date_dir / "coreg"
@@ -154,8 +163,8 @@ def run_4dsfm_day(
 
     # Shared reference cache — downsampled ref + stable ref + ref diagnostic
     # plots all depend only on (ref_cloud, ref_downsample, glacier_mask), so
-    # they're built once and reused for every day in output_new/.
-    ref_cache_dir = output_dir / "output_new" / "_ref_cache"
+    # they're built once and reused for every day in output/.
+    ref_cache_dir = output_dir / "output" / "_ref_cache"
     ref_ds_stem   = ref_cloud.stem + f"_ds{ref_downsample:.2f}"
     ref_ds_path   = ref_cache_dir / f"{ref_ds_stem}.las"
     stable_ref    = ref_cache_dir / f"{ref_ds_stem}_stable.las"
@@ -204,7 +213,7 @@ def run_4dsfm_day(
 
     # ── Stable reference (shared cache across all days) ──────────────────
     # Downsampled ref + glacier-masked, slope/NDWI-filtered stable ref live
-    # under output_new/_ref_cache/. extract_stable_reference also writes the
+    # under output/_ref_cache/. extract_stable_reference also writes the
     # reference NDWI + RGB diagnostic plots there (once, reused across days).
     ref_cache_dir.mkdir(parents=True, exist_ok=True)
     if not ref_ds_path.exists():
@@ -277,7 +286,7 @@ def run_4dsfm_day(
     # buildDepthMaps + buildPointCloud + export must run in the same session
     # as the matrix assignment, otherwise the corrected M is silently lost
     # on the next doc.open() (Metashape recomputes M from GPS priors).
-    if overwrite or not validated_laz.exists():
+    if run_validation and (overwrite or not validated_laz.exists()):
         print(f"\n[Step 6] Rebuild co-registered cloud — {new_date}")
         rebuild_coreg_cloud(
             psx_path        = psx_path,
@@ -286,12 +295,14 @@ def run_4dsfm_day(
             depth_downscale = depth_downscale,
             utm_epsg        = utm_epsg,
         )
+    elif not run_validation:
+        print("\n[Step 6] Skipping — run_validation=False")
     else:
         print(f"[Step 6] Skipping — {validated_laz.name} exists")
 
     # ── Step 6b: M3C2 between stable TBA (Step 3b) and validated cloud ───
     # Near-zero → ASP transform was correctly propagated into the rebuild.
-    if overwrite or not validated_stable.exists():
+    if run_validation and (overwrite or not validated_stable.exists()):
         print(f"\n[Step 6b] Validate rebuilt cloud — {new_date}")
         import numpy as np
         import py4dgeo
@@ -331,6 +342,8 @@ def run_4dsfm_day(
         plt.tight_layout()
         plt.savefig(val_plot_dir / "m3c2_validation.png", dpi=150)
         plt.close(fig)
+    elif not run_validation:
+        print("[Step 6b] Skipping — run_validation=False")
     else:
         print(f"[Step 6b] Skipping — {validated_stable.name} exists")
 
@@ -391,6 +404,7 @@ def run_4dsfm_day_with_rasters(
     overwrite: bool = False,
     verbose: bool = False,
     add_to_registry: bool = True,
+    run_validation: bool = True,
     # ── Raster knobs ──────────────────────────────────────────────────────
     res: float = 1.0,
     max_gap_pixels: int = 1,
@@ -404,6 +418,7 @@ def run_4dsfm_day_with_rasters(
     overwrite_stable: bool = False,
     overwrite_stable_dod: bool = False,
     overwrite_m3c2: bool = False,
+    dem_method: str = "point2dem",
 ) -> dict:
     """Run 4D SfM Steps 1–7 + build every per-date raster output.
 
@@ -413,7 +428,7 @@ def run_4dsfm_day_with_rasters(
     point that a minimal batch notebook (see ``4d_sfm_dem_monthly.ipynb``)
     calls in a loop.
 
-    Outputs (all under ``<output_dir>/output_new/<new_date>/single_day/``
+    Outputs (all under ``<output_dir>/output/<new_date>/single_day/``
     unless otherwise noted):
 
     - ``<date>_dem.tif`` + ``<date>_ortho.tif`` (per-day DEM + ortho)
@@ -421,7 +436,7 @@ def run_4dsfm_day_with_rasters(
     - ``<date>_dem_stable.tif`` + ``DOD_stable.tif`` + ``dod_stable_histogram.png``
     - ``M3C2_raster.tif`` + ``m3c2_raster_histogram.png``
 
-    The shared reference rasters land in ``<output_dir>/output_new/_ref_cache/``
+    The shared reference rasters land in ``<output_dir>/output/_ref_cache/``
     (built once, skipped on subsequent dates):
 
     - ``reference_dem.tif`` + ``reference_ortho.tif``
@@ -455,6 +470,13 @@ def run_4dsfm_day_with_rasters(
     overwrite_stable_dod, overwrite_m3c2 :
         Per-raster overwrite flags. Default ``False`` skips if the file is
         on disk.
+    dem_method : str
+        DEM rasteriser. ``"point2dem"`` (default) — ASP ``point2dem``, the
+        published HSfM method (Gaussian distance-weighted average / "IDW",
+        1-cell search radius); fast, multithreaded, leaves large gaps as
+        nodata. ``"cubic"`` — scipy Clough-Tocher ``griddata``; slow and
+        interpolates across gaps. Both reference and day DEMs use the chosen
+        method, anchored to the same grid so the DoD differences cleanly.
 
     Returns
     -------
@@ -472,6 +494,7 @@ def run_4dsfm_day_with_rasters(
     from cntp.raster import (
         build_reference_dem_and_ortho,
         build_dem_and_ortho,
+        build_dem_and_ortho_p2d,
         build_dod,
         extract_stable_terrain_from_dem,
         m3c2_to_raster,
@@ -503,13 +526,14 @@ def run_4dsfm_day_with_rasters(
         overwrite       = overwrite,
         verbose         = verbose,
         add_to_registry = add_to_registry,
+        run_validation  = run_validation,
     )
 
     # ── Resolve shared paths + CRS ───────────────────────────────────────
-    day_dir       = output_dir / "output_new" / new_date
+    day_dir       = output_dir / "output" / new_date
     aligned_las   = day_dir / "coreg" / f"{new_date}_cloud_coreg_hsfm.las"
     single_day    = day_dir / "single_day"
-    ref_cache_dir = output_dir / "output_new" / "_ref_cache"
+    ref_cache_dir = output_dir / "output" / "_ref_cache"
     ref_ds_path   = ref_cache_dir / f"{ref_cloud.stem}_ds{ref_downsample:.2f}.las"
     ref_input     = ref_ds_path if ref_ds_path.exists() else ref_cloud
 
@@ -517,29 +541,61 @@ def run_4dsfm_day_with_rasters(
         with laspy.open(ref_cloud) as _f:
             utm_epsg = _f.header.parse_crs().to_epsg()
 
-    # ── Reference DEM + ortho (cached, built once across dates) ──────────
-    ref_dem, ref_ortho = build_reference_dem_and_ortho(
-        ref_cloud_path   = ref_input,
-        cache_dir        = ref_cache_dir,
-        res              = res,
-        max_gap_pixels   = max_gap_pixels,
-        utm_epsg         = utm_epsg,
-        cloud_downsample = ref_cloud_downsample,
-        overwrite        = overwrite_ref_dem,
-    )
-
-    # ── Per-day DEM + ortho ──────────────────────────────────────────────
-    dem, ortho = build_dem_and_ortho(
-        cloud_las        = aligned_las,
-        ref_las          = ref_cloud,
-        out_dir          = single_day,
-        name_stem        = new_date,
-        res              = res,
-        max_gap_pixels   = max_gap_pixels,
-        utm_epsg         = utm_epsg,
-        cloud_downsample = tba_downsample,
-        overwrite        = overwrite_day_dem,
-    )
+    # ── Reference + per-day DEM + ortho ──────────────────────────────────
+    # Both DEMs are anchored to ref_input so their grids match and the DoD
+    # differences without resampling. (The cubic day DEM previously anchored
+    # to the full ref_cloud, whose bbox is ~1 px taller than the ds ref_input
+    # → a 1-row DoD shape mismatch; anchoring both to ref_input fixes it.)
+    if dem_method == "point2dem":
+        ref_dem, ref_ortho = build_dem_and_ortho_p2d(
+            cloud_las        = ref_input,
+            ref_las          = ref_input,
+            out_dir          = ref_cache_dir,
+            name_stem        = "reference",
+            res              = res,
+            max_gap_pixels   = max_gap_pixels,
+            utm_epsg         = utm_epsg,
+            cloud_downsample = ref_cloud_downsample,
+            overwrite        = overwrite_ref_dem,
+            verbose          = verbose,
+        )
+        dem, ortho = build_dem_and_ortho_p2d(
+            cloud_las        = aligned_las,
+            ref_las          = ref_input,
+            out_dir          = single_day,
+            name_stem        = new_date,
+            res              = res,
+            max_gap_pixels   = max_gap_pixels,
+            utm_epsg         = utm_epsg,
+            cloud_downsample = tba_downsample,
+            overwrite        = overwrite_day_dem,
+            verbose          = verbose,
+        )
+    elif dem_method == "cubic":
+        ref_dem, ref_ortho = build_reference_dem_and_ortho(
+            ref_cloud_path   = ref_input,
+            cache_dir        = ref_cache_dir,
+            res              = res,
+            max_gap_pixels   = max_gap_pixels,
+            utm_epsg         = utm_epsg,
+            cloud_downsample = ref_cloud_downsample,
+            overwrite        = overwrite_ref_dem,
+        )
+        dem, ortho = build_dem_and_ortho(
+            cloud_las        = aligned_las,
+            ref_las          = ref_input,
+            out_dir          = single_day,
+            name_stem        = new_date,
+            res              = res,
+            max_gap_pixels   = max_gap_pixels,
+            utm_epsg         = utm_epsg,
+            cloud_downsample = tba_downsample,
+            overwrite        = overwrite_day_dem,
+        )
+    else:
+        raise ValueError(
+            f"dem_method must be 'point2dem' or 'cubic', got {dem_method!r}"
+        )
 
     # ── DoD + histogram ──────────────────────────────────────────────────
     dod_path = build_dod(

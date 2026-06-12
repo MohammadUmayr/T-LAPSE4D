@@ -663,17 +663,17 @@ def bootstrap_registry(
     ref_date : str
         Date (``YYYY-MM-DD``) of the reference day.
     output_dir : str | Path
-        Root output directory (parent of ``output_new/``), matching the value
+        Root output directory (parent of ``output/``), matching the value
         used by the per-day pipeline.
     registry_csv : str | Path
         Registry CSV to create.
     cameras_csv_out, calib_dir_out : str | Path, optional
         Where to write the reference day's camera CSV and calibration XMLs.
-        Default ``output_dir/output_new/<ref_date>/4D_SfM/…`` — the location
+        Default ``output_dir/output/<ref_date>/4D_SfM/…`` — the location
         the pipeline expects.
     ref_cloud_out : str | Path, optional
         Where to write the reference point cloud (``.laz``, exported from the
-        chunk's dense cloud in UTM). Default ``output_dir/output_new/reference.laz``.
+        chunk's dense cloud in UTM). Default ``output_dir/output/reference.laz``.
         This is the ``ref_cloud`` the per-day pipeline co-registers against.
     export_ref_cloud : bool
         When True (default), also export the dense reference point cloud. Set
@@ -707,7 +707,7 @@ def bootstrap_registry(
             "n_sensors": None, "cameras": None,
         }
 
-    ref_export_dir = output_dir / "output_new" / ref_date / "4D_SfM"
+    ref_export_dir = output_dir / "output" / ref_date / "4D_SfM"
     if cameras_csv_out is None:
         cameras_csv_out = ref_export_dir / f"{ref_date}_cameras_4DSfM.csv"
     if calib_dir_out is None:
@@ -780,7 +780,7 @@ def bootstrap_registry(
     ref_cloud_path = None
     if export_ref_cloud:
         cloud_out = (Path(ref_cloud_out) if ref_cloud_out is not None
-                     else output_dir / "output_new" / "reference.laz")
+                     else output_dir / "output" / "reference.laz")
         cloud_out.parent.mkdir(parents=True, exist_ok=True)
         if cloud_out.exists() and not overwrite:
             print(f"  Reference cloud exists — skipping export: {cloud_out.name}")
@@ -864,7 +864,7 @@ def run_multitemporal_ba(
     reference_registry_csv = Path(reference_registry_csv)
     output_dir             = Path(output_dir)
 
-    sfm_dir  = output_dir / "output_new" / date / "4D_SfM"
+    sfm_dir  = output_dir / "output" / date / "4D_SfM"
     sfm_dir.mkdir(parents=True, exist_ok=True)
     psx_path = sfm_dir / f"{date}_4DSfM.psx"
 
@@ -984,7 +984,7 @@ def run_multitemporal_ba(
     print("  Optimising cameras ...", flush=True)
     chunk.optimizeCameras(
         fit_f=True, fit_cx=True, fit_cy=True,
-        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
+        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True,
         fit_p1=True, fit_p2=True,
         fit_b1=False, fit_b2=False,
         adaptive_fitting=False,
@@ -1064,7 +1064,7 @@ def run_single_day_fixed_iop(
     cameras_csv = Path(cameras_csv)
     output_dir  = Path(output_dir)
 
-    day_dir  = output_dir / "output_new" / date / "single_day"
+    day_dir  = output_dir / "output" / date / "single_day"
     day_dir.mkdir(parents=True, exist_ok=True)
     psx_path = day_dir / f"{date}.psx"
 
@@ -1131,7 +1131,7 @@ def run_single_day_fixed_iop(
     print("  Optimising cameras (IOP fixed) ...", flush=True)
     chunk.optimizeCameras(
         fit_f=True, fit_cx=True, fit_cy=True,
-        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
+        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True,
         fit_p1=True, fit_p2=True,
         fit_b1=False, fit_b2=False,
         adaptive_fitting=False,

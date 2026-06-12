@@ -61,8 +61,9 @@ def save_ortho(x, y, rgb, xi, yi, res, max_gap_pixels, filename, crs_epsg, trans
         # Build KD-tree in XY
         tree = cKDTree(np.column_stack([x, y]))
 
-        # Nearest neighbour lookup
-        dist, idx = tree.query(pixels_xy, k=1, distance_upper_bound=res * max_gap_pixels)
+        # Nearest neighbour lookup (multithreaded query — same result)
+        dist, idx = tree.query(pixels_xy, k=1, distance_upper_bound=res * max_gap_pixels,
+                               workers=-1)
         # Mask out empty pixels
         mask = np.isfinite(dist)
 
@@ -261,6 +262,90 @@ def build_dem_and_ortho(
     return dem_path, ortho_path
 
 
+def build_dem_and_ortho_p2d(
+    cloud_las: str | Path,
+    ref_las: str | Path,
+    out_dir: str | Path,
+    name_stem: str,
+    res: float = 1.0,
+    max_gap_pixels: int = 1,
+    utm_epsg: int = None,
+    cloud_downsample: float = 1.0,
+    overwrite: bool = False,
+    verbose: bool = False,
+) -> tuple:
+    """DEM via ASP ``point2dem`` (HSfM method) + ortho via KDTree NN, shared grid.
+
+    Drop-in alternative to :func:`build_dem_and_ortho` that rasterises the DEM
+    with ASP ``point2dem`` instead of cubic ``griddata``. This is the published
+    HSfM DEM method: point2dem's default ``weighted_average`` filter (Gaussian
+    distance weighting — what the HSfM paper calls "IDW") with
+    ``--search-radius-factor = max_gap_pixels`` (= 1 grid cell). Cells with no
+    point inside the search radius are left as nodata rather than interpolated,
+    avoiding artifacts over large data gaps. C++, multithreaded, streaming —
+    seconds rather than minutes, no Delaunay / Clough-Tocher overshoot.
+
+    The DEM grid is pinned to *ref_las*'s footprint (``--t_projwin``) so day and
+    reference DEMs share a grid and difference without resampling. The ortho is
+    built with the *same* :func:`save_ortho` (nearest-neighbour RGB) as
+    :func:`build_dem_and_ortho`, on **point2dem's output grid** (read back from
+    the DEM GeoTIFF), so DEM and ortho share an identical pixel grid (required
+    by :func:`extract_stable_terrain_from_dem`).
+
+    Note: ``point2dem`` yields a grid one row taller than
+    :func:`build_dem_and_ortho`'s ``np.arange`` grid for the same bbox (cell-edge
+    snapping). A DEM from this function must be differenced only against another
+    DEM from this function — do not mix with cubic DEMs. ``cloud_downsample``
+    applies only to the **ortho** load; ``point2dem`` streams the full cloud for
+    the DEM regardless.
+
+    Parameters / returns mirror :func:`build_dem_and_ortho`.
+    """
+    from cntp.asp import point2dem      # local import — avoids any import cycle
+
+    cloud_las = Path(cloud_las)
+    ref_las   = Path(ref_las)
+    out_dir   = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dem_path   = out_dir / f"{name_stem}_dem.tif"
+    ortho_path = out_dir / f"{name_stem}_ortho.tif"
+    if not overwrite and dem_path.exists() and ortho_path.exists():
+        print(f"  DEM + ortho cached → {dem_path.name}, {ortho_path.name}")
+        return dem_path, ortho_path
+
+    # ── 1. DEM via point2dem (HSfM), grid pinned to ref_las ──────────────
+    asp_dem = point2dem(
+        cloud_las, out_prefix=out_dir / name_stem, res=res, utm_epsg=utm_epsg,
+        max_gap_pixels=max_gap_pixels, ref_las=ref_las, verbose=verbose,
+    )
+    Path(asp_dem).replace(dem_path)    # "<stem>-DEM.tif" → "<stem>_dem.tif"
+
+    # ── 2. Read point2dem's grid → pixel-centre coordinates ──────────────
+    with rasterio.open(dem_path) as src:
+        transform = src.transform
+        W, H      = src.width, src.height
+        crs_epsg  = src.crs.to_string()
+    xmin, ymax = transform.c, transform.f
+    xs = xmin + (np.arange(W) + 0.5) * transform.a     # transform.a = +res
+    ys = ymax + (np.arange(H) + 0.5) * transform.e     # transform.e = -res
+    xi, yi = np.meshgrid(xs, ys)
+    xmax = xmin + W * transform.a
+    ymin = ymax + H * transform.e
+
+    # ── 3. Load + XY-clip the cloud for the ortho ────────────────────────
+    cloud = load_las(cloud_las, downsample_factor=cloud_downsample)
+    inb = ((cloud[:, 0] >= xmin) & (cloud[:, 0] <= xmax) &
+           (cloud[:, 1] >= ymin) & (cloud[:, 1] <= ymax))
+    cloud = cloud[inb]
+    print(f"  point2dem DEM {W}x{H} → ortho from {len(cloud):,} pts", flush=True)
+
+    # ── 4. Ortho via the same (parallel) save_ortho, on point2dem's grid ─
+    save_ortho(cloud[:, 0], cloud[:, 1], cloud[:, 3:6], xi, yi, res, max_gap_pixels,
+               str(ortho_path), crs_epsg, transform)
+
+    return dem_path, ortho_path
+
+
 def build_reference_dem_and_ortho(
     ref_cloud_path: str | Path,
     cache_dir: str | Path,
@@ -286,7 +371,7 @@ def build_reference_dem_and_ortho(
         the pipeline's cached ``_ref_cache/<stem>_ds<f>.las`` for a faster
         build that's consistent with the ICP basis.
     cache_dir : str | Path
-        Destination — typically ``output_new/_ref_cache/``.
+        Destination — typically ``output/_ref_cache/``.
     res, max_gap_pixels, utm_epsg :
         See :func:`build_dem_and_ortho`.
     cloud_downsample : float
@@ -351,7 +436,7 @@ def build_dod(
         Reference DEM GeoTIFF (e.g. ``_ref_cache/<stem>_dem.tif``).
     day_dem_path : str | Path
         Day's co-registered DEM GeoTIFF
-        (e.g. ``<output_new>/<date>/single_day/<date>_dem.tif``).
+        (e.g. ``<output>/<date>/single_day/<date>_dem.tif``).
     out_path : str | Path, optional
         Output GeoTIFF. Default ``<day_dem_path.parent>/DOD.tif``.
     overwrite : bool

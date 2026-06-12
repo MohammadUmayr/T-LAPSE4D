@@ -920,8 +920,10 @@ def point2dem(
     Thin wrapper around the same Ames Stereo Pipeline binary that
     :func:`pc_align_p2p_sp2p` already requires. ``point2dem`` is streaming and
     multi-threaded: no Python-side RAM blow-up, no Delaunay triangulation, no
-    Clough-Tocher overshoot. Per-pixel binning + median aggregation, written
-    straight to a GeoTIFF. Not used by the 4D-SfM pipeline (which rasterises
+    Clough-Tocher overshoot. Per-pixel Gaussian distance-weighted average
+    (point2dem's default ``weighted_average`` filter — what the HSfM workflow
+    calls "IDW"), written straight to a GeoTIFF. Not used by the 4D-SfM pipeline
+    (which rasterises
     via :func:`cntp.raster.build_dem_and_ortho`), but kept here as a faster,
     lower-memory alternative for ad-hoc DEM generation.
 
