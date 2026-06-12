@@ -222,6 +222,45 @@ ASP provides the `pc_align` and `point2dem` tools the pipeline calls.
 > `4d_sfm_pipeline.ipynb` shows the per-date SfM run. The snippets below are condensed
 > from them.
 
+### Configure your glaciers — `site_config.py`
+
+Keep every per-glacier path in one project-local `site_config.py` instead of passing
+them to each call. [`resolve_site`](cntp/sites.py) takes the three paths you choose and
+derives the rest (registry, reference cloud, output dirs) by convention:
+
+```python
+# site_config.py  — project-local (your paths); not committed to the library
+from cntp.sites import resolve_site
+
+changri_north = resolve_site(
+    output_dir   = "/mnt/e/umayr/Changri/Changri_North",
+    tlcam_dir    = "/mnt/e/umayr/Changri/TLCAM/ChangriNorth_renamed",
+    glacier_mask = "/mnt/e/umayr/Changri/Changri_North/shapefile/Shapefile_ChangriNorth.shp",
+)
+
+changri_west = resolve_site(
+    output_dir   = "/mnt/e/umayr/Changri/Changri_West",
+    tlcam_dir    = "/mnt/e/umayr/Changri/TLCAM/ChangriWest_renamed",
+    glacier_mask = "/mnt/e/umayr/Changri/Changri_West/shapefile/glacier_mask_pcs.shp",
+)
+```
+
+You set only `output_dir`, `tlcam_dir`, `glacier_mask`; everything under
+`<output_dir>/output/` (registry, reference cloud, per-date results) follows fixed
+conventions. Then pick a glacier in any notebook/script and read every path from it:
+
+```python
+from site_config import changri_north as site   # or: changri_west
+
+site.tlcam_dir        # timelapse images
+site.glacier_mask     # glacier outline shapefile
+site.ref_cloud        # <output_dir>/output/Reference_UAV_TLC_PCS.laz   (derived)
+site.registry_csv     # <output_dir>/output/reference_registry.csv      (derived)
+```
+
+Add a glacier by copying a block; `cntp.sites.init_site_config()` writes a
+ready-to-edit template. The steps below take their paths from this `site` object.
+
 ### 1. One-time setup per glacier — `setup_new_glacier.ipynb`
 
 ```python
@@ -236,13 +275,15 @@ tlcam_dir = ensure_standardized("/data/SITE/raw")        # → /data/SITE/raw_re
 
 # (c) extract calibrations + camera positions into the registry AND export the
 #     reference point cloud (UTM .laz) to ref_cloud_out
+from site_config import changri_north as site
+
 bootstrap_registry(
-    ref_psx       = "/data/SITE/reference.psx",
-    chunk_label   = "OptimiseCamera(woCP)",
-    ref_date      = "2024-01-07",
-    output_dir    = "/data/SITE",
-    registry_csv  = "/data/SITE/output_new/reference_registry.csv",
-    ref_cloud_out = "/data/SITE/output_new/Reference_UAV_TLC_PCS.laz",   # exported reference cloud (UTM .laz)
+    ref_psx       = "/mnt/e/umayr/Changri/Changri_North/CNNR_vols4-8_2023_11_29.psx",
+    chunk_label   = "<chunk label inside the .psx>",
+    ref_date      = "2023-11-29",
+    output_dir    = site.output_dir,
+    registry_csv  = site.registry_csv,
+    ref_cloud_out = site.ref_cloud,            # exported reference cloud (UTM .laz)
 )
 ```
 
@@ -258,12 +299,12 @@ bootstrap_registry(
 from cntp.pipeline_4dsfm import run_4dsfm_day_with_rasters
 
 result = run_4dsfm_day_with_rasters(
-    new_date     = "2024-01-18",
-    tlcam_dir    = tlcam_dir,
-    ref_cloud    = "/data/SITE/output_new/Reference_UAV_TLC_PCS.laz",   # the cloud bootstrap_registry exported
-    glacier_mask = "/data/SITE/glacier.shp",
-    registry_csv = "/data/SITE/output_new/reference_registry.csv",
-    output_dir   = "/data/SITE",
+    new_date     = "2023-12-15",
+    tlcam_dir    = site.tlcam_dir,
+    ref_cloud    = site.ref_cloud,
+    glacier_mask = site.glacier_mask,
+    registry_csv = site.registry_csv,
+    output_dir   = site.output_dir,
 )
 print(result["dod_stats"], result["m3c2_stats"])
 ```
