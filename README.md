@@ -216,7 +216,7 @@ ASP provides the `pc_align` and `point2dem` tools the pipeline calls.
 ## Quickstart
 
 > **Worked examples live in the notebooks.** The clearest way to see how to use the
-> library is the Jupyter notebooks under `contributors/umayr/` — chiefly
+> library is the Jupyter notebooks under `examples/` — chiefly
 > **`setup_new_glacier.ipynb`** (one-time per-glacier setup) and
 > **`4d_sfm_dem_monthly.ipynb`** (processing dates + producing all raster products);
 > `4d_sfm_pipeline.ipynb` shows the per-date SfM run. The snippets below are condensed
@@ -228,7 +228,7 @@ You process **one glacier at a time**. Copy the committed template once, then ed
 the **3 paths at the top** (the rest are derived):
 
 ```bash
-cp contributors/umayr/site_config.example.py contributors/umayr/site_config.py
+cp examples/site_config.example.py examples/site_config.py
 ```
 
 `site_config.py` is gitignored, so your paths stay local (never committed, no
@@ -454,7 +454,7 @@ tunable flags below (defaults shown — most runs only set the required argument
 
 ## Notebooks
 
-The driver notebooks for the current library live in `contributors/umayr/`:
+The driver notebooks for the current library live in `examples/`:
 
 | Notebook | Purpose |
 |---|---|

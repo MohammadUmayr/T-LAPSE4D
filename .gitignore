@@ -136,5 +136,12 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# project-local glacier config — copy from site_config.example.py (paths stay local)
-contributors/umayr/site_config.py
+# project-local — per-machine config + personal workspace (not part of the library)
+site_config.py
+contributors/umayr/site_config.example.py
+contributors/umayr/setup_new_glacier.ipynb
+contributors/umayr/4d_sfm_dem_monthly.ipynb
+contributors/umayr/4d_sfm_pipeline.ipynb
+contributors/umayr/4d_sfm_dem.ipynb
+contributors/umayr/overview.ipynb
+contributors/umayr/project_knowledge.md
