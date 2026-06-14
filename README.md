@@ -224,38 +224,32 @@ ASP provides the `pc_align` and `point2dem` tools the pipeline calls.
 
 ### Configure your glaciers — `site_config.py`
 
-You process **one glacier at a time**. Keep its paths in one project-local
-`site_config.py`; to switch glacier you just edit the three paths.
-[`resolve_site`](cntp/sites.py) derives the rest (registry, reference cloud,
-output dirs) by convention:
+You process **one glacier at a time**. All paths live in one file —
+`site_config.py`: edit the **3 at the top**; the rest are derived. Both notebooks
+read it (`import site_config as site`), so they can't drift. To switch glacier,
+change the 3 paths.
 
 ```python
-# site_config.py  — project-local (your paths); not committed to the library
-from cntp.sites import resolve_site
+# site_config.py — edit the 3 paths for the glacier you're processing
+from pathlib import Path
 
-site = resolve_site(
-    output_dir   = "/mnt/e/umayr/Changri/Changri_North",                              # results go in <output_dir>/output/
-    tlcam_dir    = "/mnt/e/umayr/Changri/TLCAM/ChangriNorth_renamed",                 # timelapse images
-    glacier_mask = "/mnt/e/umayr/Changri/Changri_North/shapefile/Shapefile_ChangriNorth.shp",  # glacier outline
-)
+output_dir   = Path("/mnt/e/umayr/Changri/Changri_North")                                       # results go in output_dir/output/
+tlcam_dir    = Path("/mnt/e/umayr/Changri/TLCAM/ChangriNorth_renamed")                          # timelapse images
+glacier_mask = Path("/mnt/e/umayr/Changri/Changri_North/shapefile/Shapefile_ChangriNorth.shp")  # glacier outline
+
+# ── derived automatically — leave these ──
+out           = output_dir / "output"
+ref_cloud     = out / "Reference_UAV_TLC_PCS.laz"
+registry_csv  = out / "reference_registry.csv"
+ref_tlc_cloud = out / "_ref_cache" / "reference_TLC_coreg.las"
 ```
 
-You set only `output_dir`, `tlcam_dir`, `glacier_mask`; everything under
-`<output_dir>/output/` (registry, reference cloud, per-date results) is derived.
-Every notebook reads the same single `site`, so setup and processing can't drift:
+Every notebook then reads it the same way, and uses `site.tlcam_dir`,
+`site.ref_cloud`, `site.registry_csv`, …:
 
 ```python
-from site_config import site
-
-site.tlcam_dir        # timelapse images
-site.glacier_mask     # glacier outline shapefile
-site.ref_cloud        # <output_dir>/output/Reference_UAV_TLC_PCS.laz   (derived)
-site.registry_csv     # <output_dir>/output/reference_registry.csv      (derived)
+import site_config as site
 ```
-
-To process a different glacier, edit those three paths (or run
-`cntp.sites.init_site_config()` to drop a fresh template). The steps below read
-their paths from this `site`.
 
 ### 1. One-time setup per glacier — `setup_new_glacier.ipynb`
 
@@ -271,7 +265,7 @@ tlcam_dir = ensure_standardized("/data/SITE/raw")        # → /data/SITE/raw_re
 
 # (c) extract calibrations + camera positions into the registry AND export the
 #     reference point cloud (UTM .laz) to ref_cloud_out
-from site_config import site
+import site_config as site
 
 bootstrap_registry(
     ref_psx       = "/mnt/e/umayr/Changri/Changri_North/CNNR_vols4-8_2023_11_29.psx",

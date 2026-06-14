@@ -4,6 +4,28 @@ Each entry records what was added or changed, where, and exactly what to remove 
 
 ---
 
+## 2026-06-13 — Config simplified: self-contained `site_config.py`; removed `cntp/sites.py`
+
+### Why
+`cntp/sites.py` (`resolve_site`) was needless indirection — the config imported a
+library function just to build paths, and nothing in the pipeline imported it.
+Folded its job straight into `site_config.py` as plain, visible lines.
+
+### Changes
+- **Deleted `cntp/sites.py`** (only `site_config.py` + docs referenced it; no pipeline import).
+- `contributors/umayr/site_config.py` is now self-contained: 3 `Path(...)` inputs at the
+  top + a derived block (`out`, `ref_cloud`, `registry_csv`, `ref_tlc_cloud`). No
+  `resolve_site`, no `cntp.sites`.
+- Notebooks now `import site_config as site` (was `from site_config import site`).
+- README config section + this log updated.
+
+### To revert
+Restore `cntp/sites.py` from git; put `from cntp.sites import resolve_site` +
+`site = resolve_site(...)` back in `site_config.py`; notebooks back to
+`from site_config import site`.
+
+---
+
 ## 2026-06-11 — Single-source per-glacier paths (`site_config.py` + `cntp.sites`) + `output_new`→`output`
 
 ### Why
