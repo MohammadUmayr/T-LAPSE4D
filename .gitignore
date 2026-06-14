@@ -135,3 +135,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# project-local glacier config — copy from site_config.example.py (paths stay local)
+contributors/umayr/site_config.py

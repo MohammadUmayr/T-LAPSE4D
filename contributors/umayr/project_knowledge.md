@@ -17,6 +17,10 @@ Folded its job straight into `site_config.py` as plain, visible lines.
   top + a derived block (`out`, `ref_cloud`, `registry_csv`, `ref_tlc_cloud`). No
   `resolve_site`, no `cntp.sites`.
 - Notebooks now `import site_config as site` (was `from site_config import site`).
+- **Standard config handling:** `site_config.py` is **gitignored**; committed
+  `site_config.example.py` is the template. Setup = `cp site_config.example.py
+  site_config.py` + edit 3 paths. Keeps machine paths out of git and avoids
+  cross-machine conflicts (the `.env.example` convention).
 - README config section + this log updated.
 
 ### To revert

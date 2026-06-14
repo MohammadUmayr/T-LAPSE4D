@@ -224,10 +224,16 @@ ASP provides the `pc_align` and `point2dem` tools the pipeline calls.
 
 ### Configure your glaciers — `site_config.py`
 
-You process **one glacier at a time**. All paths live in one file —
-`site_config.py`: edit the **3 at the top**; the rest are derived. Both notebooks
-read it (`import site_config as site`), so they can't drift. To switch glacier,
-change the 3 paths.
+You process **one glacier at a time**. Copy the committed template once, then edit
+the **3 paths at the top** (the rest are derived):
+
+```bash
+cp contributors/umayr/site_config.example.py contributors/umayr/site_config.py
+```
+
+`site_config.py` is gitignored, so your paths stay local (never committed, no
+cross-machine conflicts). Both notebooks read it (`import site_config as site`),
+so they can't drift. To switch glacier, change the 3 paths.
 
 ```python
 # site_config.py — edit the 3 paths for the glacier you're processing
