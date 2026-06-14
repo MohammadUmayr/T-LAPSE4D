@@ -14,8 +14,9 @@ Folded its job straight into `site_config.py` as plain, visible lines.
 ### Changes
 - **Deleted `cntp/sites.py`** (only `site_config.py` + docs referenced it; no pipeline import).
 - `contributors/umayr/site_config.py` is now self-contained: 3 `Path(...)` inputs at the
-  top + a derived block (`out`, `ref_cloud`, `registry_csv`, `ref_tlc_cloud`). No
-  `resolve_site`, no `cntp.sites`.
+  top + a derived block (`out`, `ref_cloud`, `registry_csv`). No
+  `resolve_site`, no `cntp.sites`. (`ref_tlc_cloud` dropped — it's for the
+  unfinished TLC-reference experiment, not the standard config.)
 - Notebooks now `import site_config as site` (was `from site_config import site`).
 - **Standard config handling:** `site_config.py` is **gitignored**; committed
   `site_config.example.py` is the template. Setup = `cp site_config.example.py

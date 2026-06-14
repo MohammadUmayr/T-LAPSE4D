@@ -247,7 +247,6 @@ glacier_mask = Path("/mnt/e/umayr/Changri/Changri_North/shapefile/Shapefile_Chan
 out           = output_dir / "output"
 ref_cloud     = out / "Reference_UAV_TLC_PCS.laz"
 registry_csv  = out / "reference_registry.csv"
-ref_tlc_cloud = out / "_ref_cache" / "reference_TLC_coreg.las"
 ```
 
 Every notebook then reads it the same way, and uses `site.tlcam_dir`,
