@@ -20,11 +20,12 @@ rest follow fixed conventions. `ref_cloud=` overrides the convention for legacy
 layouts (West keeps its cloud in `Ref_PC/`). `ref_downsample` is a *param*, not a
 path, so it's deliberately NOT here. Also `init_site_config()` writes a template.
 
-### `contributors/umayr/site_config.py` (new — the project's values, single source)
-`changri_north` + `changri_west` via `resolve_site(...)`. Every notebook does
-`from site_config import changri_north as site` and uses `site.tlcam_dir` /
-`site.ref_cloud` / … — setup and monthly now read the *same object*, so they can't
-disagree. A new user edits this one file (3 paths/glacier), never the library.
+### `contributors/umayr/site_config.py` (the project's values, single source)
+One active `site = resolve_site(...)` for the glacier you're processing. Every
+notebook does `from site_config import site` and uses `site.tlcam_dir` /
+`site.ref_cloud` / … — setup and monthly read the *same object*, so they can't
+disagree. **One glacier at a time**: switch by editing the 3 paths (a commented
+spare block holds the other glacier). A new user edits this one file, never the library.
 
 ### `output_new` → `output`
 - Code: `sed output_new→output` in `cntp/pipeline_4dsfm.py`, `cntp/metashape.py`,

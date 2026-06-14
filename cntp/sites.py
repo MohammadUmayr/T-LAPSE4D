@@ -1,10 +1,12 @@
 """Derive every per-glacier path from the few you choose.
 
-Everything a glacier produces lives under ``<output_dir>/output/``. Those
-sub-paths follow fixed conventions, so you set only ``output_dir``, ``tlcam_dir``
-and ``glacier_mask`` — :func:`resolve_site` fills in the rest. Keep your actual
-paths in a project-local ``site_config.py`` (not in the library) so every
-notebook reads one source and can't drift.
+You process **one glacier at a time**. A project-local ``site_config.py`` holds
+the paths for the glacier you're currently working on as a single ``site``; to
+switch glaciers you edit those paths. Every notebook does ``from site_config
+import site``, so setup and per-date processing read the same source and can't
+drift. You set only ``output_dir``, ``tlcam_dir`` and ``glacier_mask`` —
+:func:`resolve_site` fills in the rest (everything lives under
+``<output_dir>/output/`` by fixed convention).
 """
 
 from pathlib import Path
@@ -49,12 +51,13 @@ def resolve_site(output_dir, tlcam_dir, glacier_mask,
 
 
 _TEMPLATE = '''\
-"""Per-glacier paths. Edit the values, then in any notebook:
-    from site_config import my_glacier as site
+"""Glacier setup — the ONLY file you edit to choose a glacier.
+Every notebook reads `site` from here, so their paths can never go out of sync.
+To set up or switch glacier: change the 3 paths below. That's the whole config.
 """
 from cntp.sites import resolve_site
 
-my_glacier = resolve_site(
+site = resolve_site(
     output_dir   = "/path/to/glacier",              # results go in <output_dir>/output/
     tlcam_dir    = "/path/to/cameras_renamed",       # standardised timelapse images
     glacier_mask = "/path/to/glacier_outline.shp",   # glacier outline shapefile
