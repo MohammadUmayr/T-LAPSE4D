@@ -619,6 +619,7 @@ def update_registry(
     if registry_csv.exists():
         existing = pd.read_csv(registry_csv)
         existing["date"] = existing["date"].map(_normalize_date)
+        existing = existing[existing["date"] != _normalize_date(date)]
         combined = pd.concat([existing, new_df], ignore_index=True)
     else:
         combined = new_df
@@ -766,6 +767,8 @@ def bootstrap_registry(
         print(f"  WARNING: {missing} time-lapse cameras had no photo path")
 
     # ── Write registry ───────────────────────────────────────────────────
+    if overwrite and registry_csv.exists():
+        registry_csv.unlink()
     update_registry(
         registry_csv      = registry_csv,
         date              = ref_date,
@@ -984,7 +987,7 @@ def run_multitemporal_ba(
     print("  Optimising cameras ...", flush=True)
     chunk.optimizeCameras(
         fit_f=True, fit_cx=True, fit_cy=True,
-        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True,
+        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
         fit_p1=True, fit_p2=True,
         fit_b1=False, fit_b2=False,
         adaptive_fitting=False,
@@ -1017,6 +1020,7 @@ def run_single_day_fixed_iop(
     utm_epsg: int,
     match_downscale: int = 1,
     depth_downscale: int = 2,
+    filter_mode: str = "Mild",
     loc_acc: tuple = (0.5, 0.5, 0.5),
     rot_acc: tuple = (5.0, 5.0, 5.0),
 ) -> tuple[Path, Path]:
@@ -1131,7 +1135,7 @@ def run_single_day_fixed_iop(
     print("  Optimising cameras (IOP fixed) ...", flush=True)
     chunk.optimizeCameras(
         fit_f=True, fit_cx=True, fit_cy=True,
-        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True,
+        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
         fit_p1=True, fit_p2=True,
         fit_b1=False, fit_b2=False,
         adaptive_fitting=False,
@@ -1140,8 +1144,10 @@ def run_single_day_fixed_iop(
     doc.save()
 
     # ── Dense point cloud ─────────────────────────────────────────────────
-    print("  Building depth maps ...", flush=True)
-    chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=Metashape.MildFiltering)
+    _filter = {"Mild": Metashape.MildFiltering, "Moderate": Metashape.ModerateFiltering,
+               "Aggressive": Metashape.AggressiveFiltering}
+    print(f"  Building depth maps (filter={filter_mode}) ...", flush=True)
+    chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=_filter[filter_mode])
     print("  Building point cloud ...", flush=True)
     chunk.buildPointCloud()
     doc.save()
@@ -1196,6 +1202,7 @@ def rebuild_coreg_cloud(
     output_laz: Path,
     depth_downscale: int,
     utm_epsg: int,
+    filter_mode: str = "Mild",
 ) -> Path:
     """Apply the ASP ECEF transform to a Metashape project and rebuild its cloud.
 
@@ -1268,8 +1275,10 @@ def rebuild_coreg_cloud(
     _, p1 = _cam_wgs84()
     print(f"  [{lbl}] AFTER T : alt={p1[2]:.3f} m  shift={_shift_m(p0, p1):.4f} m", flush=True)
 
-    print("  Building depth maps ...", flush=True)
-    chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=Metashape.MildFiltering)
+    _filter = {"Mild": Metashape.MildFiltering, "Moderate": Metashape.ModerateFiltering,
+               "Aggressive": Metashape.AggressiveFiltering}
+    print(f"  Building depth maps (filter={filter_mode}) ...", flush=True)
+    chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=_filter[filter_mode])
 
     print("  Building point cloud ...", flush=True)
     chunk.buildPointCloud()

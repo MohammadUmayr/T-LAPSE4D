@@ -48,6 +48,7 @@ def run_4dsfm_day(
     output_dir: Path,
     match_downscale: int = 1,
     depth_downscale: int = 2,
+    filter_mode: str = "Mild",
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
     ref_downsample: float = 0.4,
@@ -205,6 +206,7 @@ def run_4dsfm_day(
             utm_epsg        = utm_epsg,
             match_downscale = match_downscale,
             depth_downscale = depth_downscale,
+            filter_mode     = filter_mode,
             loc_acc         = loc_acc_new,
             rot_acc         = rot_acc_new,
         )
@@ -294,6 +296,7 @@ def run_4dsfm_day(
             output_laz      = validated_laz,
             depth_downscale = depth_downscale,
             utm_epsg        = utm_epsg,
+            filter_mode     = filter_mode,
         )
     elif not run_validation:
         print("\n[Step 6] Skipping — run_validation=False")
@@ -393,6 +396,7 @@ def run_4dsfm_day_with_rasters(
     # ── SfM pipeline kwargs (forwarded to run_4dsfm_day) ──────────────────
     match_downscale: int = 1,
     depth_downscale: int = 2,
+    filter_mode: str = "Mild",
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
     ref_downsample: float = 0.4,
@@ -446,7 +450,7 @@ def run_4dsfm_day_with_rasters(
     ----------
     new_date, tlcam_dir, ref_cloud, glacier_mask, registry_csv, output_dir :
         See :func:`run_4dsfm_day`.
-    match_downscale, depth_downscale, loc_acc_new, rot_acc_new, ref_downsample,
+    match_downscale, depth_downscale, filter_mode, loc_acc_new, rot_acc_new, ref_downsample,
     tba_downsample, p2p_max_disp, sp2p_max_disp, m_sp2p_max_disp, use_ecef,
     overwrite, verbose, add_to_registry :
         Forwarded to :func:`run_4dsfm_day`.
@@ -515,6 +519,7 @@ def run_4dsfm_day_with_rasters(
         output_dir      = output_dir,
         match_downscale = match_downscale,
         depth_downscale = depth_downscale,
+        filter_mode     = filter_mode,
         loc_acc_new     = loc_acc_new,
         rot_acc_new     = rot_acc_new,
         ref_downsample  = ref_downsample,
