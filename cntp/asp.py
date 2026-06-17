@@ -411,6 +411,7 @@ def pc_align_stage(
     alignment_method: str,
     max_displacement: float,
     initial_transform: Path = None,
+    outlier_ratio: float = 0.75,
     verbose: bool = False,
 ) -> Path:
     """Run one stage of ASP ``pc_align`` on two LAZ/LAS point clouds.
@@ -452,6 +453,7 @@ def pc_align_stage(
         "pc_align",
         "--threads", str(os.cpu_count() or 1),
         "--max-displacement", str(max_displacement),
+        "--outlier-ratio", str(outlier_ratio),
         "--alignment-method", alignment_method,
         "-o", str(output_prefix),
     ]
@@ -561,6 +563,9 @@ def pc_align_p2p_sp2p(
     p2p_max_displacement: float = 2.0,
     sp2p_max_displacement: float = 1.0,
     m_sp2p_max_displacement: float = 0.1,
+    p2p_outlier_ratio: float = 0.75,
+    sp2p_outlier_ratio: float = 0.75,
+    m_sp2p_outlier_ratio: float = 0.75,
     ref_downsample_factor: float = 1.0,
     tba_downsample_factor: float = None,
     utm_epsg: int = None,
@@ -614,6 +619,12 @@ def pc_align_p2p_sp2p(
         Stage-2 max correspondence distance [m].
     m_sp2p_max_displacement:
         Stage-3 max correspondence distance [m].
+    p2p_outlier_ratio, sp2p_outlier_ratio, m_sp2p_outlier_ratio:
+        Fraction of source points treated as inliers at each stage (default
+        0.75 = ASP default).  Lower values (e.g. 0.5) make ICP focus on the
+        best-matching points and discard more outliers — useful when the
+        source cloud contains both stable terrain and moving glacier and you
+        want ICP to ignore the glacier (Stage 3 is the most sensitive).
     ref_downsample_factor:
         Fraction of reference cloud points to keep for ICP (0 < factor <= 1.0).
         Default 1.0 passes the full cloud to ASP.
@@ -722,6 +733,7 @@ def pc_align_p2p_sp2p(
         output_dir / "stage1" / "run",
         alignment_method="point-to-plane",
         max_displacement=p2p_max_displacement,
+        outlier_ratio=p2p_outlier_ratio,
         verbose=verbose,
     )
 
@@ -738,6 +750,7 @@ def pc_align_p2p_sp2p(
         output_dir / "stage2" / "run",
         alignment_method="similarity-point-to-point",
         max_displacement=sp2p_max_displacement,
+        outlier_ratio=sp2p_outlier_ratio,
         initial_transform=t1,
         verbose=verbose,
     )
@@ -756,6 +769,7 @@ def pc_align_p2p_sp2p(
         output_dir / "stage3" / "run",
         alignment_method="similarity-point-to-point",
         max_displacement=m_sp2p_max_displacement,
+        outlier_ratio=m_sp2p_outlier_ratio,
         initial_transform=t2,
         verbose=verbose,
     )
@@ -833,8 +847,8 @@ def evaluate_coreg(
     Returns
     -------
     dict with keys:
-        med_before, std_before, dist_before,
-        med_after,  std_after,  dist_after,
+        med_before, nmad_before, std_before, dist_before,
+        med_after,  nmad_after,  std_after,  dist_after,
         stable_tba_after  (Nx9 array used for M3C2 after co-registration).
     """
     _tba_ds = tba_downsample_factor if tba_downsample_factor is not None else ref_downsample_factor
@@ -877,11 +891,11 @@ def evaluate_coreg(
     epoch_before = _to_epoch(before_stable)
     epoch_after  = _to_epoch(after_stable)
 
-    med_b, std_b, dist_b = run_m3c2(epoch_ref, epoch_before)
-    med_a, std_a, dist_a = run_m3c2(epoch_ref, epoch_after)
+    med_b, nmad_b, std_b, dist_b = run_m3c2(epoch_ref, epoch_before)
+    med_a, nmad_a, std_a, dist_a = run_m3c2(epoch_ref, epoch_after)
 
-    print(f"  Before — median M3C2: {med_b:.4f} m  std: {std_b:.4f} m")
-    print(f"  After  — median M3C2: {med_a:.4f} m  std: {std_a:.4f} m")
+    print(f"  Before — median: {med_b:+.4f} m  nmad: {nmad_b:.4f} m  std: {std_b:.4f} m")
+    print(f"  After  — median: {med_a:+.4f} m  nmad: {nmad_a:.4f} m  std: {std_a:.4f} m")
 
     if stable_dir is not None:
         stable_dir = Path(stable_dir)
@@ -894,8 +908,8 @@ def evaluate_coreg(
         plot_m3c2_distances(dist_b, dist_a, plot_dir, title="ASP HSfM co-registration")
 
     return dict(
-        med_before=med_b, std_before=std_b, dist_before=dist_b,
-        med_after=med_a,  std_after=std_a,  dist_after=dist_a,
+        med_before=med_b, nmad_before=nmad_b, std_before=std_b, dist_before=dist_b,
+        med_after=med_a,  nmad_after=nmad_a,  std_after=std_a,  dist_after=dist_a,
         stable_tba_after=after_stable,
     )
 

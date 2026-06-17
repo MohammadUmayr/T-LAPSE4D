@@ -76,12 +76,18 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
     d_before = dist_before[~np.isnan(dist_before)]
     d_after  = dist_after[~np.isnan(dist_after)]
 
-    med_before, std_before = float(np.median(d_before)), float(np.std(d_before))
-    med_after,  std_after  = float(np.median(d_after)),  float(np.std(d_after))
+    med_before  = float(np.median(d_before))
+    med_after   = float(np.median(d_after))
+    nmad_before = float(1.4826 * np.median(np.abs(d_before - med_before)))
+    nmad_after  = float(1.4826 * np.median(np.abs(d_after  - med_after)))
+    mean_before = float(np.mean(d_before))
+    mean_after  = float(np.mean(d_after))
+    std_before  = float(np.std(d_before))
+    std_after   = float(np.std(d_after))
 
-    clip = 3 * std_before
-    d_before_plot = np.clip(d_before, -clip, clip)
-    d_after_plot  = np.clip(d_after,  -clip, clip)
+    clip = 3 * std_before   # wide enough that no spike forms at the boundary
+    d_before_plot = d_before[np.abs(d_before) <= clip]
+    d_after_plot  = d_after[np.abs(d_after)   <= clip]
 
     fig, ax = plt.subplots()
     ax.hist(d_before_plot, bins=60, alpha=0.5, label='before', color='steelblue')
@@ -90,8 +96,10 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
                label=f'med before = {med_before:+.3f} m')
     ax.axvline(med_after, color='tomato', linestyle='--', linewidth=1.2,
                label=f'med after  = {med_after:+.3f} m')
-    ax.plot([], [], ' ', label=f'std before = {std_before:.3f} m')
-    ax.plot([], [], ' ', label=f'std after  = {std_after:.3f} m')
+    ax.plot([], [], ' ', label=f'nmad before = {nmad_before:.3f} m')
+    ax.plot([], [], ' ', label=f'nmad after  = {nmad_after:.3f} m')
+    ax.plot([], [], ' ', label=f'std before  = {std_before:.3f} m')
+    ax.plot([], [], ' ', label=f'std after   = {std_after:.3f} m')
     ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
     ax.set_xlabel('M3C2 distance (m)')
     ax.set_ylabel('Count')

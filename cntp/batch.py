@@ -144,8 +144,8 @@ def coreg_pc(ref_cloud_path: str | Path,
 
         result = _coreg_single(epoch_stable_ref, tba_data, cam_coordinates)
 
-        tqdm.write(f"Before coreg — median of M3C2 distances STABLE: {result['med_before']:.3f} m  std of M3C2 distances STABLE: {result['std_before']:.3f} m")
-        tqdm.write(f"After  coreg — median of M3C2 distances STABLE: {result['med_after']:.3f} m  std of M3C2 distances STABLE: {result['std_after']:.3f} m")
+        tqdm.write(f"Before coreg — median: {result['med_before']:+.3f} m  nmad: {result['nmad_before']:.3f} m  std: {result['std_before']:.3f} m")
+        tqdm.write(f"After  coreg — median: {result['med_after']:+.3f} m  nmad: {result['nmad_after']:.3f} m  std: {result['std_after']:.3f} m")
 
         plot_stable_terrain_diagnostics(
             result["stable_slope"], result["stable_final"],
@@ -160,8 +160,8 @@ def coreg_pc(ref_cloud_path: str | Path,
             )
 
         stats_rows.append([tba_cloud_name,
-                           result["med_before"], result["std_before"],
-                           result["med_after"],  result["std_after"]])
+                           result["med_before"], result["nmad_before"], result["std_before"],
+                           result["med_after"],  result["nmad_after"],  result["std_after"]])
 
         # Save transformation
         trafo = result["trafo"]
@@ -180,8 +180,9 @@ def coreg_pc(ref_cloud_path: str | Path,
     csv_path = dem_dir / "coreg_stats.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["tba_cloud_name", "med_before_coreg", "std_before_coreg",
-                         "med_after_coreg", "std_after_coreg"])
+        writer.writerow(["tba_cloud_name",
+                         "med_before_coreg", "nmad_before_coreg", "std_before_coreg",
+                         "med_after_coreg",  "nmad_after_coreg",  "std_after_coreg"])
         writer.writerows(stats_rows)
     print(f"Stats saved to {csv_path}")
     print("DONE")

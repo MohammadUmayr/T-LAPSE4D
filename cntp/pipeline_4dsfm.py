@@ -56,6 +56,9 @@ def run_4dsfm_day(
     p2p_max_disp: float = 10.0,
     sp2p_max_disp: float = 5.0,
     m_sp2p_max_disp: float = 2.0,
+    p2p_outlier_ratio: float = 0.75,
+    sp2p_outlier_ratio: float = 0.75,
+    m_sp2p_outlier_ratio: float = 0.75,
     use_ecef: bool = True,
     overwrite: bool = False,
     verbose: bool = False,
@@ -119,14 +122,14 @@ def run_4dsfm_day(
         (``aligned_las``), not the rebuilt ``validated_laz``, and with the
         registry frozen nothing else consumes it, so validation is dead weight.
         The coreg M3C2 plot (Step 3b) is independent and always runs. When
-        skipped, ``validation_med`` / ``validation_std`` stay NaN.
+        skipped, ``validation_med`` / ``validation_nmad`` / ``validation_std`` stay NaN.
 
     Returns
     -------
     dict
         ``date, tba_las_path, aligned_las, validated_laz, cameras_coreg_csv,
-        transform_path, coreg_med_before, coreg_med_after, coreg_std_after,
-        validation_med, validation_std``.
+        transform_path, coreg_med_before, coreg_med_after, coreg_nmad_after, coreg_std_after,
+        validation_med, validation_nmad, validation_std``.
     """
     output_dir   = Path(output_dir)
     ref_cloud    = Path(ref_cloud)
@@ -171,8 +174,8 @@ def run_4dsfm_day(
     stable_ref    = ref_cache_dir / f"{ref_ds_stem}_stable.las"
     ref_plot_dir  = ref_cache_dir / "m3c2_plots" / "reference"
 
-    coreg_med_before = coreg_med_after = coreg_std_after = float("nan")
-    validation_med   = validation_std  = float("nan")
+    coreg_med_before = coreg_med_after = coreg_nmad_after = coreg_std_after = float("nan")
+    validation_med   = validation_nmad = validation_std  = float("nan")
 
     # ── Step 1: multi-temporal bundle adjustment ─────────────────────────
     if overwrite or not cameras_4dsfm_csv.exists():
@@ -242,6 +245,9 @@ def run_4dsfm_day(
             p2p_max_displacement    = p2p_max_disp,
             sp2p_max_displacement   = sp2p_max_disp,
             m_sp2p_max_displacement = m_sp2p_max_disp,
+            p2p_outlier_ratio       = p2p_outlier_ratio,
+            sp2p_outlier_ratio      = sp2p_outlier_ratio,
+            m_sp2p_outlier_ratio    = m_sp2p_outlier_ratio,
             ref_downsample_factor   = 1.0,
             tba_downsample_factor   = tba_downsample,
             utm_epsg                = ecef_epsg,
@@ -264,9 +270,10 @@ def run_4dsfm_day(
             stable_dir            = coreg_dir / "stable_tba",
             plot_dir              = coreg_dir / "m3c2_plots",
         )
-        coreg_med_before = eval_result["med_before"]
-        coreg_med_after  = eval_result["med_after"]
-        coreg_std_after  = eval_result["std_after"]
+        coreg_med_before  = eval_result["med_before"]
+        coreg_med_after   = eval_result["med_after"]
+        coreg_nmad_after  = eval_result["nmad_after"]
+        coreg_std_after   = eval_result["std_after"]
     else:
         print("[Step 3b] Skipping — stable TBA exists")
 
@@ -323,8 +330,8 @@ def run_4dsfm_day(
         stable_tba_cloud = load_las(stable_tba_path)
         epoch_tba = py4dgeo.Epoch(stable_tba_cloud[:, :3])
         epoch_val = py4dgeo.Epoch(val_stable_arr[:, :3])
-        validation_med, validation_std, dist_val = run_m3c2(epoch_tba, epoch_val)
-        print(f"  M3C2 median : {validation_med:.4f} m  std : {validation_std:.4f} m")
+        validation_med, validation_nmad, validation_std, dist_val = run_m3c2(epoch_tba, epoch_val)
+        print(f"  M3C2  median: {validation_med:+.4f} m  nmad: {validation_nmad:.4f} m  std: {validation_std:.4f} m")
 
         val_plot_dir = val_dir / "validation_plots"
         val_plot_dir.mkdir(parents=True, exist_ok=True)
@@ -332,11 +339,11 @@ def run_4dsfm_day(
         # x-axis. Stats shown in the label come from run_m3c2 over the full
         # (un-clipped) distance array, so they match the printed values.
         d      = dist_val[~np.isnan(dist_val)]
-        d_plot = np.clip(d, -3 * np.std(d), 3 * np.std(d))
+        d_plot = np.clip(d, -3 * validation_nmad, 3 * validation_nmad)
         fig, ax = plt.subplots()
         ax.hist(d_plot, bins=60, color="steelblue", alpha=0.8)
         ax.axvline(validation_med, color="tomato", linestyle="--", linewidth=1.5,
-                   label=f"median = {validation_med:.4f} m  std = {validation_std:.4f} m")
+                   label=f"median = {validation_med:+.4f} m  nmad = {validation_nmad:.4f} m")
         ax.axvline(0, color="black", linewidth=0.8, linestyle=":")
         ax.set_xlabel("M3C2 distance (m)")
         ax.set_ylabel("Count")
@@ -376,8 +383,10 @@ def run_4dsfm_day(
         "transform_path":    str(transform_path),
         "coreg_med_before":  coreg_med_before,
         "coreg_med_after":   coreg_med_after,
+        "coreg_nmad_after":  coreg_nmad_after,
         "coreg_std_after":   coreg_std_after,
         "validation_med":    validation_med,
+        "validation_nmad":   validation_nmad,
         "validation_std":    validation_std,
     }
 
@@ -404,6 +413,9 @@ def run_4dsfm_day_with_rasters(
     p2p_max_disp: float = 10.0,
     sp2p_max_disp: float = 5.0,
     m_sp2p_max_disp: float = 2.0,
+    p2p_outlier_ratio: float = 0.75,
+    sp2p_outlier_ratio: float = 0.75,
+    m_sp2p_outlier_ratio: float = 0.75,
     use_ecef: bool = True,
     overwrite: bool = False,
     verbose: bool = False,
@@ -524,10 +536,13 @@ def run_4dsfm_day_with_rasters(
         rot_acc_new     = rot_acc_new,
         ref_downsample  = ref_downsample,
         tba_downsample  = tba_downsample,
-        p2p_max_disp    = p2p_max_disp,
-        sp2p_max_disp   = sp2p_max_disp,
-        m_sp2p_max_disp = m_sp2p_max_disp,
-        use_ecef        = use_ecef,
+        p2p_max_disp         = p2p_max_disp,
+        sp2p_max_disp        = sp2p_max_disp,
+        m_sp2p_max_disp      = m_sp2p_max_disp,
+        p2p_outlier_ratio    = p2p_outlier_ratio,
+        sp2p_outlier_ratio   = sp2p_outlier_ratio,
+        m_sp2p_outlier_ratio = m_sp2p_outlier_ratio,
+        use_ecef             = use_ecef,
         overwrite       = overwrite,
         verbose         = verbose,
         add_to_registry = add_to_registry,

@@ -179,9 +179,11 @@ def run_m3c2(epoch_ref: py4dgeo.Epoch, epoch_tba: py4dgeo.Epoch,
     Returns
     -------
     median : float
-        Median M3C2 distance.
+    nmad : float
+        1.4826 × median(|d − median(d)|) — robust spread, not inflated by outliers.
     std : float
-        Standard deviation of M3C2 distances.
+        Standard deviation — sensitive to outliers; kept for comparison.
+    distances : np.ndarray
     """
     m3c2 = py4dgeo.M3C2(
         epochs=(epoch_ref, epoch_tba),
@@ -191,7 +193,10 @@ def run_m3c2(epoch_ref: py4dgeo.Epoch, epoch_tba: py4dgeo.Epoch,
         max_distance=max_distance,
     )
     distances, _ = m3c2.run()
-    return float(np.nanmedian(distances)), float(np.nanstd(distances)), distances
+    med  = float(np.nanmedian(distances))
+    nmad = float(1.4826 * np.nanmedian(np.abs(distances - med)))
+    std  = float(np.nanstd(distances))
+    return med, nmad, std, distances
 
 
 def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
@@ -218,9 +223,11 @@ def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
         ndwi         : NDWI values of stable_slope
         grayscale    : mean RGB intensity of stable_slope
         med_before   : median M3C2 distance before co-registration
-        std_before   : std M3C2 distance before co-registration
+        nmad_before  : NMAD of M3C2 distances before co-registration
+        std_before   : std of M3C2 distances before co-registration
         med_after    : median M3C2 distance after co-registration
-        std_after    : std M3C2 distance after co-registration
+        nmad_after   : NMAD of M3C2 distances after co-registration
+        std_after    : std of M3C2 distances after co-registration
     """
     stable_slope, stable_final = extract_stable_terrain(tba_data)
 
@@ -240,7 +247,7 @@ def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
     print(f"  TBA centroid:  {tba_centroid}")
     print(f"  Centroid diff: {tba_centroid - ref_centroid}")
 
-    med_before, std_before, dist_before = run_m3c2(epoch_stable_ref, epoch_stable)
+    med_before, nmad_before, std_before, dist_before = run_m3c2(epoch_stable_ref, epoch_stable)
 
     trafo = py4dgeo.iterative_closest_point(
         py4dgeo.Epoch(epoch_stable_ref.cloud.copy()), epoch_stable,
@@ -249,7 +256,7 @@ def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
     epoch_all.transform(trafo)
     epoch_stable.transform(trafo)
 
-    med_after, std_after, dist_after = run_m3c2(epoch_stable_ref, epoch_stable)
+    med_after, nmad_after, std_after, dist_after = run_m3c2(epoch_stable_ref, epoch_stable)
 
     cloud_coreg = np.column_stack((epoch_all.cloud, tba_data[:, 3:6], tba_data[:, 6:]))
 
@@ -261,8 +268,10 @@ def coreg_pc(epoch_stable_ref: py4dgeo.Epoch,
         "ndwi":          ndwi,
         "grayscale":     grayscale,
         "med_before":    med_before,
+        "nmad_before":   nmad_before,
         "std_before":    std_before,
         "med_after":     med_after,
+        "nmad_after":    nmad_after,
         "std_after":     std_after,
         "dist_before":   dist_before,
         "dist_after":    dist_after,

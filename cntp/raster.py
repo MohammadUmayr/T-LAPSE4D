@@ -769,7 +769,7 @@ def m3c2_to_raster(
     epoch_day = py4dgeo.Epoch(day_arr[:, :3])
     print(f"  Running M3C2 (normal_radii={normal_radii} m, "
           f"cyl_radius={cyl_radius} m, max_distance={max_distance} m) …")
-    med, std, distances = run_m3c2(
+    med, _, std, distances = run_m3c2(
         epoch_ref, epoch_day,
         normal_radii = normal_radii,
         cyl_radius   = cyl_radius,

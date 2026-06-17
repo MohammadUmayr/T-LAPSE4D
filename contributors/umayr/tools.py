@@ -12,6 +12,8 @@ Current prototypes
   ``cntp.pipeline_4dsfm.run_4dsfm_day_with_rasters`` for SfM + coreg, but the
   DoD / stable-DoD / M3C2 rasters are built against the TLC reference so the
   change signal is TLC-vs-TLC (UAV↔TLC instrument bias cancels as common mode).
+- ``plot_m3c2_spatial``              — 2-panel spatial QC map of M3C2 residuals
+  before/after coregistration; analogous to demcoreg difference maps.
 """
 
 from __future__ import annotations
@@ -612,3 +614,228 @@ def run_4dsfm_day_with_rasters_tlc(
         "stable_stats": stable_stats,
         "m3c2_stats":   m3c2_stats,
     }
+
+
+# ---------------------------------------------------------------------------
+# Part 3 — Spatial M3C2 QC plot (demcoreg-style)
+# ---------------------------------------------------------------------------
+
+def plot_m3c2_spatial(
+    ref_stable: "np.ndarray",
+    dist_before: "np.ndarray",
+    dist_after: "np.ndarray",
+    output_dir=None,
+    title: str = '',
+    filename: str = "m3c2_spatial.png",
+    n_bins: int = 150,
+    vmax: float = None,
+) -> None:
+    """2-panel spatial map of M3C2 residuals before and after co-registration.
+
+    Bins the stable-terrain M3C2 distances onto a regular easting/northing grid
+    (median per cell) and displays before/after side by side with a diverging
+    RdBu_r colormap centred on zero.
+
+    A good co-registration shows a **random, unstructured pattern** close to
+    zero after coreg — no spatial gradients (tilt), stripes (scan bias), or
+    zones of systematic offset.  This is the point-cloud analogue of the
+    demcoreg elevation-difference QC maps.
+
+    Parameters
+    ----------
+    ref_stable:
+        (N, ≥2) stable-terrain reference points — columns 0/1 are easting /
+        northing.  Typically ``ref_stable`` returned by
+        :func:`cntp.asp.evaluate_coreg` or the ``ref_stable`` array inside
+        ``evaluate_coreg`` (pass it out via a wrapper if needed).
+    dist_before, dist_after:
+        (N,) M3C2 distances returned by ``run_m3c2`` — same length as
+        ``ref_stable``, NaN where no valid distance was found.
+    n_bins:
+        Grid resolution (cells per axis).  150 works well for a ~1 km² scene
+        at 1 m resolution; reduce for sparse stable terrain.
+    vmax:
+        Symmetric colour-axis limit [m].  Defaults to the 95th percentile of
+        ``|dist_before|`` (captures the spread without being driven by outliers).
+    output_dir:
+        Directory to save the PNG.  ``None`` → inline display (notebook).
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+    from scipy.stats import binned_statistic_2d
+
+    # Shift to relative km so axes have no offset notation.
+    # x: easting in km relative to nearest round km
+    # y: northing in km relative to nearest round km
+    x_raw = ref_stable[:, 0] / 1000.0
+    y_raw = ref_stable[:, 1] / 1000.0
+    x0 = round(x_raw.min())
+    y0 = round(y_raw.min())
+    x = x_raw - x0
+    y = y_raw - y0
+    x_label = f'Easting - {x0:.0f} (km)'
+    y_label = f'Northing - {y0:.0f} (km)'
+    extent = [[float(x.min()), float(x.max())], [float(y.min()), float(y.max())]]
+
+    def _grid(dist):
+        mask = ~np.isnan(dist)
+        if mask.sum() < 4:
+            return np.full((n_bins, n_bins), np.nan)
+        stat, _, _, _ = binned_statistic_2d(
+            x[mask], y[mask], dist[mask],
+            statistic='median', bins=n_bins, range=extent,
+        )
+        return stat.T          # rows = northing, cols = easting for imshow
+
+    grid_b = _grid(dist_before)
+    grid_a = _grid(dist_after)
+
+    if vmax is None:
+        valid = dist_before[~np.isnan(dist_before)]
+        vmax = float(np.percentile(np.abs(valid), 95)) if len(valid) else 1.0
+    vmax = max(vmax, 0.01)
+
+    im_extent = [x.min(), x.max(), y.min(), y.max()]
+    n_b = int(np.sum(~np.isnan(dist_before)))
+    n_a = int(np.sum(~np.isnan(dist_after)))
+
+    # Tight view: crop to where valid M3C2 distances actually exist
+    has_data = ~np.isnan(dist_before) | ~np.isnan(dist_after)
+    pad_x = (x[has_data].max() - x[has_data].min()) * 0.05
+    pad_y = (y[has_data].max() - y[has_data].min()) * 0.05
+    xlim = [x[has_data].min() - pad_x, x[has_data].max() + pad_x]
+    ylim = [y[has_data].min() - pad_y, y[has_data].max() + pad_y]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True,
+                             constrained_layout=True)
+
+    for ax, grid, label, n in zip(
+        axes, [grid_b, grid_a], ['Before coreg', 'After coreg'], [n_b, n_a]
+    ):
+        im = ax.imshow(
+            grid, origin='lower', extent=im_extent,
+            cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='auto',
+        )
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_title(f'{label}  (n={n:,})')
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+
+    fig.colorbar(im, ax=axes, label='M3C2 distance (m)',
+                 orientation='vertical', shrink=0.8, pad=0.02)
+    suptitle = f'M3C2 spatial residuals — {title}' if title else 'M3C2 spatial residuals'
+    fig.suptitle(suptitle)
+
+    if output_dir is None:
+        plt.show()
+    else:
+        out = Path(output_dir) / filename
+        plt.savefig(out, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved: {out}")
+
+
+def plot_m3c2_3d(
+    ref_stable: "np.ndarray",
+    dist_before: "np.ndarray",
+    dist_after: "np.ndarray",
+    title: str = '',
+    vmax: float = None,
+    elev: float = 22,
+    azim: float = 113,
+    output_dir=None,
+    filename: str = "m3c2_3d.png",
+    max_pts: int = 30_000,
+) -> None:
+    """3-D scatter plot of M3C2 residuals on the actual stable-terrain points.
+
+    Two panels (before / after co-registration) coloured by M3C2 distance
+    with a symmetric diverging colormap centred on zero.  Points with no
+    valid M3C2 distance (NaN) are omitted.
+
+    Parameters
+    ----------
+    ref_stable:
+        (N, ≥3) stable-terrain reference array — columns 0/1/2 are X/Y/Z.
+    dist_before, dist_after:
+        (N,) M3C2 distances, NaN where no valid distance exists.
+    vmax:
+        Symmetric colour-axis limit [m].  Defaults to 95th percentile of
+        ``|dist_before|``.
+    elev, azim:
+        3-D viewing angle (passed to ``ax.view_init``).
+    max_pts:
+        Maximum number of points to render per panel.  A random subsample is
+        drawn when the valid point count exceeds this.  30 000 gives smooth
+        interactive rotation; increase for saved PNGs (``output_dir`` set).
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+    from pathlib import Path
+
+    rng = np.random.default_rng(0)
+
+    # All axes in km with offsets so tick labels are readable
+    x_raw = ref_stable[:, 0] / 1000.0
+    y_raw = ref_stable[:, 1] / 1000.0
+    z_raw = ref_stable[:, 2] / 1000.0
+    x0 = round(x_raw.min())
+    y0 = round(y_raw.min())
+    z0 = round(z_raw.min(), 1)
+    x = x_raw - x0
+    y = y_raw - y0
+    z = z_raw - z0
+
+    if vmax is None:
+        valid = dist_before[~np.isnan(dist_before)]
+        vmax = float(np.percentile(np.abs(valid), 95)) if len(valid) else 1.0
+    vmax = max(vmax, 0.01)
+
+    fig, axes = plt.subplots(
+        1, 2, figsize=(14, 6),
+        subplot_kw={"projection": "3d"},
+        constrained_layout=True,
+    )
+
+    for ax, dist, label in zip(
+        axes, [dist_before, dist_after], ['Before coreg', 'After coreg']
+    ):
+        mask = ~np.isnan(dist)
+        n_total = int(mask.sum())
+        idx = np.where(mask)[0]
+        if n_total > max_pts:
+            idx = rng.choice(idx, size=max_pts, replace=False)
+        pts = ax.scatter(
+            x[idx], y[idx], z[idx],
+            s=1, c=dist[idx],
+            vmin=-vmax, vmax=vmax, cmap='RdBu_r',
+        )
+        shown = len(idx)
+        subtitle = f'{label}  (n={n_total:,}' + (f', showing {shown:,}' if shown < n_total else '') + ')'
+        ax.set_xlabel(f'Easting - {x0:.0f} (km)', labelpad=8)
+        ax.set_ylabel(f'Northing - {y0:.0f} (km)', labelpad=8)
+        ax.set_zlabel(f'Elevation - {z0:.1f} (km)', labelpad=8)
+        ax.set_title(subtitle)
+        ax.view_init(elev=elev, azim=azim)
+
+        # True equal aspect — all axes in km now
+        x_range = x[idx].max() - x[idx].min()
+        y_range = y[idx].max() - y[idx].min()
+        z_range = z[idx].max() - z[idx].min()
+        ax.set_box_aspect([x_range, y_range, z_range])
+
+    fig.colorbar(pts, ax=axes, label='M3C2 distance (m)',
+                 orientation='vertical', shrink=0.6, pad=0.02)
+    suptitle = f'M3C2 3D residuals — {title}' if title else 'M3C2 3D residuals'
+    fig.suptitle(suptitle)
+
+    if output_dir is None:
+        plt.show()
+    else:
+        out = Path(output_dir) / filename
+        plt.savefig(out, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved: {out}")
