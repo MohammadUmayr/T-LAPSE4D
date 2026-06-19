@@ -50,8 +50,14 @@ def plot_ndwi_vs_intensity(ndwi, grayscale_intensity, colors, line_a, line_b, ou
     plt.close(fig)
 
 
-def plot_stable_terrain_rgb(stable_points, output_dir, title='Zone de terrain stable', filename="stable_terrain_rgb.png"):
-    """3D scatter plot of stable terrain colored by RGB."""
+def plot_stable_terrain_rgb(stable_points, output_dir, title='Zone de terrain stable',
+                            filename="stable_terrain_rgb.png", elev=15, azim=-90):
+    """3D scatter plot of stable terrain colored by RGB.
+
+    ``elev``/``azim`` set the 3-D view. The default (elev=15, azim=-90) is a
+    near-frontal view — looking along Northing so Easting × Elevation faces the
+    viewer — so the terrain always appears from the front regardless of site.
+    """
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     ax.scatter(stable_points[:, 0], stable_points[:, 1], stable_points[:, 2], c=stable_points[:, 3:6] / 255, marker='.')
@@ -59,7 +65,7 @@ def plot_stable_terrain_rgb(stable_points, output_dir, title='Zone de terrain st
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
     plt.title(title)
-    ax.view_init(elev=30, azim=30)
+    ax.view_init(elev=elev, azim=azim)
     plt.savefig(Path(output_dir) / filename, dpi=150, bbox_inches='tight')
     plt.close(fig)
 

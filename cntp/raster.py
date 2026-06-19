@@ -808,3 +808,70 @@ def m3c2_to_raster(
     print(f"  M3C2 raster valid pixels : {n_valid:,}/{n_total:,} "
           f"({100 * n_valid / n_total:.1f}%) → {out_path.name}")
     return out_path
+
+
+def stable_m3c2_raster(
+    ref_stable: np.ndarray,
+    distances: np.ndarray,
+    out_path: str | Path,
+    utm_epsg: int,
+    res: float = 1.0,
+    overwrite: bool = False,
+) -> Path:
+    """Rasterise **pre-computed** stable-terrain M3C2 distances onto a grid.
+
+    Companion to :func:`m3c2_to_raster`, but for an already-computed distance
+    array (e.g. the after-co-registration residual from
+    :func:`cntp.asp.evaluate_coreg`) — so **no M3C2 is recomputed**. Each pixel
+    is the **median** distance of the corepoints that fall in it; empty cells
+    are NaN. Use it to map co-registration **uncertainty over stable terrain**
+    and stack the per-date rasters across a season.
+
+    Parameters
+    ----------
+    ref_stable : np.ndarray
+        (N, >=2) corepoint coordinates; columns 0/1 are easting / northing in
+        the ``utm_epsg`` CRS (same array M3C2 was run on).
+    distances : np.ndarray
+        (N,) M3C2 distances aligned with ``ref_stable`` (NaN where invalid).
+    out_path : str | Path
+        Output GeoTIFF.
+    utm_epsg : int
+        EPSG code of the corepoint CRS (written into the raster).
+    res : float
+        Pixel size in metres. Default 1.0.
+    overwrite : bool
+        When False (default), skip if *out_path* already exists.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not overwrite and out_path.exists():
+        print(f"  Stable M3C2 raster cached → {out_path.name}")
+        return out_path
+
+    xs = np.asarray(ref_stable[:, 0], dtype=np.float64)
+    ys = np.asarray(ref_stable[:, 1], dtype=np.float64)
+    d  = np.asarray(distances, dtype=np.float64)
+    valid = np.isfinite(xs) & np.isfinite(ys) & np.isfinite(d)
+    xs, ys, d = xs[valid], ys[valid], d[valid]
+    if xs.size == 0:
+        raise ValueError("No valid (finite) stable-terrain distances to rasterise.")
+
+    xmin, xmax = float(xs.min()), float(xs.max())
+    ymin, ymax = float(ys.min()), float(ys.max())
+    nx = max(int(np.ceil((xmax - xmin) / res)), 1)
+    ny = max(int(np.ceil((ymax - ymin) / res)), 1)
+    transform = rasterio.transform.from_origin(xmin, ymax, res, res)
+
+    rows = np.clip(((ymax - ys) / res).astype(np.int64), 0, ny - 1)
+    cols = np.clip(((xs - xmin) / res).astype(np.int64), 0, nx - 1)
+    df = pd.DataFrame({"row": rows, "col": cols, "d": d})
+    med = df.groupby(["row", "col"])["d"].median()
+
+    grid = np.full((ny, nx), np.nan, dtype=np.float64)
+    grid[med.index.get_level_values(0).values,
+         med.index.get_level_values(1).values] = med.values
+
+    save_dem(grid, out_path, f"EPSG:{utm_epsg}", transform)
+    print(f"  Stable M3C2 raster → {out_path.name}")
+    return out_path

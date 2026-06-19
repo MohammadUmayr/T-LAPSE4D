@@ -274,6 +274,16 @@ def run_4dsfm_day(
         coreg_med_after   = eval_result["med_after"]
         coreg_nmad_after  = eval_result["nmad_after"]
         coreg_std_after   = eval_result["std_after"]
+
+        # Georeferenced raster of the after-coreg stable-terrain residual
+        # (co-registration uncertainty) → single_day, for stacking over a season.
+        from cntp.raster import stable_m3c2_raster
+        stable_m3c2_raster(
+            ref_stable = eval_result["ref_stable"],
+            distances  = eval_result["dist_after"],
+            out_path   = single_dir / f"{new_date}_stable_m3c2.tif",
+            utm_epsg   = utm_epsg,
+        )
     else:
         print("[Step 3b] Skipping — stable TBA exists")
 

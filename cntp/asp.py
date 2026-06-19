@@ -56,7 +56,10 @@ def _run_command(cmd: list, verbose: bool = False) -> str:
         text=True,
     )
     if verbose:
-        print(result.stdout)
+        # Drop ASP's progress-bar lines ("--> [****....]") — they flood the log.
+        for line in result.stdout.splitlines():
+            if "--> [" not in line:
+                print(line)
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed (exit {result.returncode}):\n{result.stdout}"
@@ -914,10 +917,27 @@ def evaluate_coreg(
                           title=f"Stable-terrain M3C2 — {date_tag}",
                           filename=f"{date_tag}_m3c2_spatial.png")
 
+        # Same stats as the histogram, written to the coreg folder as CSV
+        # (plain text → git-diffable, dependency-free, easy to aggregate).
+        stats_df = pd.DataFrame(
+            {"median": [med_b, med_a], "nmad": [nmad_b, nmad_a], "std": [std_b, std_a]},
+            index=pd.Index(["before", "after"], name="coreg"),
+        )
+        stats_path = Path(plot_dir).parent / f"{date_tag}_m3c2_stats.csv"
+        stats_df.to_csv(stats_path)
+        print(f"  M3C2 stats → {stats_path}")
+
+        # Cache the raw stable-terrain distances (no coords — only what the
+        # histogram needs) so it can be re-plotted later without re-running M3C2.
+        dist_path = Path(plot_dir).parent / f"{date_tag}_m3c2_distances.npz"
+        np.savez_compressed(dist_path, before=dist_b, after=dist_a)
+        print(f"  M3C2 distances → {dist_path.name}")
+
     return dict(
         med_before=med_b, nmad_before=nmad_b, std_before=std_b, dist_before=dist_b,
         med_after=med_a,  nmad_after=nmad_a,  std_after=std_a,  dist_after=dist_a,
         stable_tba_after=after_stable,
+        ref_stable=ref_stable,   # corepoint coords, for rasterising the residual
     )
 
 
