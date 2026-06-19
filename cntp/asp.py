@@ -27,7 +27,7 @@ import py4dgeo
 from pyproj import Transformer
 from cntp.coreg import extract_stable_terrain, run_m3c2, _NDWI_A, _NDWI_B
 from cntp.io import load_las, apply_glacier_mask, save_las, read_las_bounds
-from cntp.plot import plot_stable_terrain_diagnostics, plot_m3c2_distances
+from cntp.plot import plot_stable_terrain_diagnostics, plot_m3c2_distances, plot_m3c2_spatial
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +905,14 @@ def evaluate_coreg(
         print(f"  Stable TBA (after)  : {tba_stable_out}")
 
     if plot_dir is not None:
-        plot_m3c2_distances(dist_b, dist_a, plot_dir, title="ASP HSfM co-registration")
+        # date tag from the coreg cloud name (e.g. "2024-01-18_cloud_coreg_hsfm")
+        date_tag = Path(tba_after_las).stem.split("_cloud")[0]
+        plot_m3c2_distances(dist_b, dist_a, plot_dir,
+                            title=f"Stable-terrain M3C2 — {date_tag}",
+                            filename=f"{date_tag}_m3c2_distances.png")
+        plot_m3c2_spatial(ref_stable, dist_b, dist_a, output_dir=plot_dir,
+                          title=f"Stable-terrain M3C2 — {date_tag}",
+                          filename=f"{date_tag}_m3c2_spatial.png")
 
     return dict(
         med_before=med_b, nmad_before=nmad_b, std_before=std_b, dist_before=dist_b,

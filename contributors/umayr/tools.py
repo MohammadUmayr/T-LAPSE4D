@@ -628,7 +628,11 @@ def plot_m3c2_spatial(
     title: str = '',
     filename: str = "m3c2_spatial.png",
     n_bins: int = 150,
+    res: float = 1.0,
     vmax: float = None,
+    cbar_label: str = 'M3C2 distance (m)',
+    save_pdf: bool = True,
+    layout: str = 'auto',
 ) -> None:
     """2-panel spatial map of M3C2 residuals before and after co-registration.
 
@@ -662,79 +666,113 @@ def plot_m3c2_spatial(
     """
     import numpy as np
     import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
     from pathlib import Path
     from scipy.stats import binned_statistic_2d
 
-    # Shift to relative km so axes have no offset notation.
-    # x: easting in km relative to nearest round km
-    # y: northing in km relative to nearest round km
-    x_raw = ref_stable[:, 0] / 1000.0
-    y_raw = ref_stable[:, 1] / 1000.0
-    x0 = round(x_raw.min())
-    y0 = round(y_raw.min())
-    x = x_raw - x0
-    y = y_raw - y0
-    x_label = f'Easting - {x0:.0f} (km)'
-    y_label = f'Northing - {y0:.0f} (km)'
-    extent = [[float(x.min()), float(x.max())], [float(y.min()), float(y.max())]]
+    # ── publication styling (serif body font, LaTeX-style math) ──
+    plt.rcParams.update({
+        'font.family': 'serif', 'font.size': 12, 'axes.titlesize': 13,
+        'axes.labelsize': 12, 'xtick.labelsize': 10, 'ytick.labelsize': 10,
+        'axes.linewidth': 0.8, 'mathtext.fontset': 'cm',
+    })
+
+    # UTM metres, shifted to a round origin so tick labels stay small.
+    x, y = ref_stable[:, 0], ref_stable[:, 1]
+    x0, y0 = np.floor(np.nanmin(x)), np.floor(np.nanmin(y))
+    xr, yr = x - x0, y - y0
+    rng_xy = [[float(xr.min()), float(xr.max())], [float(yr.min()), float(yr.max())]]
+
+    # fixed ground resolution → square `res`-metre cells; bin counts from extent
+    nx = max(int(np.ceil((rng_xy[0][1] - rng_xy[0][0]) / res)), 1)
+    ny = max(int(np.ceil((rng_xy[1][1] - rng_xy[1][0]) / res)), 1)
 
     def _grid(dist):
         mask = ~np.isnan(dist)
         if mask.sum() < 4:
-            return np.full((n_bins, n_bins), np.nan)
+            return np.full((ny, nx), np.nan)
         stat, _, _, _ = binned_statistic_2d(
-            x[mask], y[mask], dist[mask],
-            statistic='median', bins=n_bins, range=extent,
+            xr[mask], yr[mask], dist[mask],
+            statistic='median', bins=[nx, ny], range=rng_xy,
         )
         return stat.T          # rows = northing, cols = easting for imshow
-
-    grid_b = _grid(dist_before)
-    grid_a = _grid(dist_after)
 
     if vmax is None:
         valid = dist_before[~np.isnan(dist_before)]
         vmax = float(np.percentile(np.abs(valid), 95)) if len(valid) else 1.0
     vmax = max(vmax, 0.01)
 
-    im_extent = [x.min(), x.max(), y.min(), y.max()]
-    n_b = int(np.sum(~np.isnan(dist_before)))
-    n_a = int(np.sum(~np.isnan(dist_after)))
+    im_extent = [xr.min(), xr.max(), yr.min(), yr.max()]
+    has = ~np.isnan(dist_before) | ~np.isnan(dist_after)
+    xmin, xmax = float(xr[has].min()), float(xr[has].max())
+    ymin, ymax = float(yr[has].min()), float(yr[has].max())
+    span, yspan = xmax - xmin, ymax - ymin
+    xlim = [xmin - 0.02 * span, xmax + 0.02 * span]
+    ylim = [ymin - 0.02 * yspan, ymax + 0.02 * yspan]
 
-    # Tight view: crop to where valid M3C2 distances actually exist
-    has_data = ~np.isnan(dist_before) | ~np.isnan(dist_after)
-    pad_x = (x[has_data].max() - x[has_data].min()) * 0.05
-    pad_y = (y[has_data].max() - y[has_data].min()) * 0.05
-    xlim = [x[has_data].min() - pad_x, x[has_data].max() + pad_x]
-    ylim = [y[has_data].min() - pad_y, y[has_data].max() + pad_y]
+    # round scale-bar length ≈ 25 % of map width (m)
+    sb = min([50, 100, 200, 250, 500, 1000, 2000], key=lambda s: abs(s - span * 0.25))
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True,
-                             constrained_layout=True)
+    # ── layout adapts to the footprint shape ──
+    # Wide & short stable terrain (e.g. Changri West) reads better stacked
+    # (before above / after below); tall or square (e.g. Changri North) reads
+    # better side-by-side. Override with layout='horizontal' / 'vertical'.
+    data_aspect = span / yspan if yspan > 0 else 1.0
+    stack = (layout == 'vertical') or (layout == 'auto' and data_aspect >= 1.5)
 
-    for ax, grid, label, n in zip(
-        axes, [grid_b, grid_a], ['Before coreg', 'After coreg'], [n_b, n_a]
-    ):
+    if stack:
+        ph = 3.2
+        pw = min(max(ph * data_aspect, 4.0), 9.0)
+        fig, axes = plt.subplots(2, 1, figsize=(pw + 1.6, 2 * ph + 1.0),
+                                 sharex=True, sharey=True, constrained_layout=True)
+    else:
+        ph = 4.6
+        pw = min(max(ph * data_aspect, 2.2), 6.5)
+        fig, axes = plt.subplots(1, 2, figsize=(2 * pw + 1.8, ph + 1.0),
+                                 sharex=True, sharey=True, constrained_layout=True)
+
+    for k, (ax, dist, label) in enumerate(zip(
+        axes, [dist_before, dist_after],
+        ['Before co-registration', 'After co-registration'],
+    )):
         im = ax.imshow(
-            grid, origin='lower', extent=im_extent,
-            cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='auto',
+            _grid(dist), origin='lower', extent=im_extent,
+            cmap='RdBu', vmin=-vmax, vmax=vmax, aspect='equal',   # true map geometry
         )
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        ax.set_title(f'{label}  (n={n:,})')
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
+        ax.set_title(label, pad=8)
+        # label only the outer edges (stacked → both need Northing; bottom gets Easting)
+        if stack:
+            ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
+            if k == 1:
+                ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
+        else:
+            ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
+            if k == 0:
+                ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
 
-    fig.colorbar(im, ax=axes, label='M3C2 distance (m)',
-                 orientation='vertical', shrink=0.8, pad=0.02)
-    suptitle = f'M3C2 spatial residuals — {title}' if title else 'M3C2 spatial residuals'
-    fig.suptitle(suptitle)
+        # scale bar (lower-left)
+        bx, by = xlim[0] + 0.05 * span, ylim[0] + 0.10 * yspan
+        ax.add_patch(Rectangle((bx, by), sb, 0.018 * yspan, fc='k', ec='k', zorder=5))
+        ax.text(bx + sb / 2, by + 0.05 * yspan, f'{sb:g} m',
+                ha='center', va='bottom', fontsize=9, zorder=6)
+
+    cb = fig.colorbar(im, ax=axes, shrink=0.85, pad=0.02, extend='both')
+    cb.set_label(cbar_label)
+    if title:
+        fig.suptitle(title, y=1.02)
 
     if output_dir is None:
         plt.show()
     else:
-        out = Path(output_dir) / filename
-        plt.savefig(out, dpi=150, bbox_inches='tight')
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out / filename, dpi=300, bbox_inches='tight')
+        if save_pdf:
+            fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
         plt.close(fig)
-        print(f"  Saved: {out}")
+        print(f"  Saved: {out / filename}")
 
 
 def plot_m3c2_3d(

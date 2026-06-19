@@ -210,3 +210,147 @@ def plot_stable_terrain_diagnostics(stable_slope: np.ndarray,
                          stable_final, output_dir,
                          title=f'Zone de terrain stable - {title}',
                          filename='stable_terrain_rgb.png'))
+
+
+def plot_m3c2_spatial(
+    ref_stable: np.ndarray,
+    dist_before: np.ndarray,
+    dist_after: np.ndarray,
+    output_dir=None,
+    title: str = '',
+    filename: str = "m3c2_spatial.png",
+    res: float = 1.0,
+    vmax: float = None,
+    cbar_label: str = 'M3C2 distance (m)',
+    save_pdf: bool = True,
+    layout: str = 'auto',
+) -> None:
+    """Publication-quality 2-panel map of stable-terrain M3C2 residuals.
+
+    Bins the stable-terrain M3C2 distances onto a regular easting/northing grid
+    (median per ``res``-metre cell) and shows before vs. after co-registration
+    with a diverging colormap centred on zero — the point-cloud analogue of the
+    demcoreg elevation-difference QC maps. A good co-registration shows a
+    random, unstructured pattern near zero after coreg (no tilt/stripes).
+
+    Parameters
+    ----------
+    ref_stable:
+        (N, >=2) stable-terrain reference (corepoint) array — columns 0/1 are
+        easting / northing in the cloud's UTM CRS.
+    dist_before, dist_after:
+        (N,) M3C2 distances (``run_m3c2`` corepoint distances), NaN where no
+        valid distance was found.
+    res:
+        Ground cell size in metres (default 1.0). Bin counts follow the extent.
+    vmax:
+        Symmetric colour limit [m]; defaults to the 95th percentile of
+        ``|dist_before|``.
+    layout:
+        ``'auto'`` (default) stacks panels vertically for wide/short footprints
+        and places them side-by-side otherwise; force with ``'vertical'`` /
+        ``'horizontal'``.
+    output_dir:
+        Directory to save the PNG (+ PDF when ``save_pdf``). ``None`` → display.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+    from scipy.stats import binned_statistic_2d
+
+    plt.rcParams.update({
+        'font.family': 'serif', 'font.size': 12, 'axes.titlesize': 13,
+        'axes.labelsize': 12, 'xtick.labelsize': 10, 'ytick.labelsize': 10,
+        'axes.linewidth': 0.8, 'mathtext.fontset': 'cm',
+    })
+
+    x, y = ref_stable[:, 0], ref_stable[:, 1]
+    x0, y0 = np.floor(np.nanmin(x)), np.floor(np.nanmin(y))
+    xr, yr = x - x0, y - y0
+    rng_xy = [[float(xr.min()), float(xr.max())], [float(yr.min()), float(yr.max())]]
+
+    # fixed ground resolution → square res-metre cells; bin counts from extent
+    nx = max(int(np.ceil((rng_xy[0][1] - rng_xy[0][0]) / res)), 1)
+    ny = max(int(np.ceil((rng_xy[1][1] - rng_xy[1][0]) / res)), 1)
+
+    def _grid(dist):
+        mask = ~np.isnan(dist)
+        if mask.sum() < 4:
+            return np.full((ny, nx), np.nan)
+        stat, _, _, _ = binned_statistic_2d(
+            xr[mask], yr[mask], dist[mask],
+            statistic='median', bins=[nx, ny], range=rng_xy,
+        )
+        return stat.T          # rows = northing, cols = easting for imshow
+
+    if vmax is None:
+        valid = dist_before[~np.isnan(dist_before)]
+        vmax = float(np.percentile(np.abs(valid), 95)) if len(valid) else 1.0
+    vmax = max(vmax, 0.01)
+
+    im_extent = [xr.min(), xr.max(), yr.min(), yr.max()]
+    has = ~np.isnan(dist_before) | ~np.isnan(dist_after)
+    xmin, xmax = float(xr[has].min()), float(xr[has].max())
+    ymin, ymax = float(yr[has].min()), float(yr[has].max())
+    span, yspan = xmax - xmin, ymax - ymin
+    xlim = [xmin - 0.02 * span, xmax + 0.02 * span]
+    ylim = [ymin - 0.02 * yspan, ymax + 0.02 * yspan]
+
+    # round scale-bar length ~ 25 % of map width (m)
+    sb = min([50, 100, 200, 250, 500, 1000, 2000], key=lambda s: abs(s - span * 0.25))
+
+    # layout adapts to footprint: wide/short stacks; tall/square side-by-side
+    data_aspect = span / yspan if yspan > 0 else 1.0
+    stack = (layout == 'vertical') or (layout == 'auto' and data_aspect >= 1.5)
+
+    if stack:
+        ph = 3.2
+        pw = min(max(ph * data_aspect, 4.0), 9.0)
+        fig, axes = plt.subplots(2, 1, figsize=(pw + 1.6, 2 * ph + 1.0),
+                                 sharex=True, sharey=True, constrained_layout=True)
+    else:
+        ph = 4.6
+        pw = min(max(ph * data_aspect, 2.2), 6.5)
+        fig, axes = plt.subplots(1, 2, figsize=(2 * pw + 1.8, ph + 1.0),
+                                 sharex=True, sharey=True, constrained_layout=True)
+
+    for k, (ax, dist, label) in enumerate(zip(
+        axes, [dist_before, dist_after],
+        ['Before co-registration', 'After co-registration'],
+    )):
+        im = ax.imshow(
+            _grid(dist), origin='lower', extent=im_extent,
+            cmap='RdBu', vmin=-vmax, vmax=vmax, aspect='equal',
+        )
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_title(label, pad=8)
+        if stack:
+            ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
+            if k == 1:
+                ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
+        else:
+            ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
+            if k == 0:
+                ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
+
+        # scale bar (lower-left)
+        bx, by = xlim[0] + 0.05 * span, ylim[0] + 0.10 * yspan
+        ax.add_patch(Rectangle((bx, by), sb, 0.018 * yspan, fc='k', ec='k', zorder=5))
+        ax.text(bx + sb / 2, by + 0.05 * yspan, f'{sb:g} m',
+                ha='center', va='bottom', fontsize=9, zorder=6)
+
+    cb = fig.colorbar(im, ax=axes, shrink=0.85, pad=0.02, extend='both')
+    cb.set_label(cbar_label)
+    if title:
+        fig.suptitle(title, y=1.02)
+
+    if output_dir is None:
+        plt.show()
+    else:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out / filename, dpi=300, bbox_inches='tight')
+        if save_pdf:
+            fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved: {out / filename}")

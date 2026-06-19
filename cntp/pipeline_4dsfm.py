@@ -448,15 +448,18 @@ def run_4dsfm_day_with_rasters(
     unless otherwise noted):
 
     - ``<date>_dem.tif`` + ``<date>_ortho.tif`` (per-day DEM + ortho)
-    - ``DOD.tif`` + ``dod_histogram.png``
-    - ``<date>_dem_stable.tif`` + ``DOD_stable.tif`` + ``dod_stable_histogram.png``
-    - ``M3C2_raster.tif`` + ``m3c2_raster_histogram.png``
+    - ``<date>_DOD.tif`` + ``<date>_dod_histogram.png``
+    - ``<date>_M3C2_raster.tif`` + ``<date>_m3c2_raster_histogram.png``
+
+    Stable-terrain co-registration accuracy is the Step-3b M3C2 (before/after),
+    saved under ``<date>/coreg/m3c2_plots/`` as ``<date>_m3c2_distances.png``
+    (histogram) and ``<date>_m3c2_spatial.png`` (+ PDF) — this replaces the
+    former stable-DoD raster.
 
     The shared reference rasters land in ``<output_dir>/output/_ref_cache/``
     (built once, skipped on subsequent dates):
 
     - ``reference_dem.tif`` + ``reference_ortho.tif``
-    - ``reference_dem_stable.tif``
 
     Parameters
     ----------
@@ -482,10 +485,12 @@ def run_4dsfm_day_with_rasters(
     utm_epsg : int, optional
         EPSG code for the raster CRS. When ``None``, parsed from
         ``ref_cloud``'s LAS header.
-    overwrite_ref_dem, overwrite_day_dem, overwrite_dod, overwrite_stable,
-    overwrite_stable_dod, overwrite_m3c2 :
+    overwrite_ref_dem, overwrite_day_dem, overwrite_dod, overwrite_m3c2 :
         Per-raster overwrite flags. Default ``False`` skips if the file is
         on disk.
+    overwrite_stable, overwrite_stable_dod :
+        Accepted for backward compatibility but unused — the stable-DoD raster
+        was removed in favour of the Step-3b M3C2 on stable terrain.
     dem_method : str
         DEM rasteriser. ``"point2dem"`` (default) — ASP ``point2dem``, the
         published HSfM method (Gaussian distance-weighted average / "IDW",
@@ -512,7 +517,6 @@ def run_4dsfm_day_with_rasters(
         build_dem_and_ortho,
         build_dem_and_ortho_p2d,
         build_dod,
-        extract_stable_terrain_from_dem,
         m3c2_to_raster,
     )
     from cntp.plot import plot_dod_histogram
@@ -621,7 +625,7 @@ def run_4dsfm_day_with_rasters(
     dod_path = build_dod(
         ref_dem_path = ref_dem,
         day_dem_path = dem,
-        out_path     = single_day / "DOD.tif",
+        out_path     = single_day / f"{new_date}_DOD.tif",
         overwrite    = overwrite_dod,
     )
     with rasterio.open(dod_path) as src:
@@ -630,46 +634,23 @@ def run_4dsfm_day_with_rasters(
         dod_values,
         output_dir = single_day,
         title      = f"DoD — {new_date}",
-        filename   = "dod_histogram.png",
+        filename   = f"{new_date}_dod_histogram.png",
     )
 
-    # ── Stable-terrain DoD + histogram ───────────────────────────────────
-    ref_ortho_path = ref_cache_dir / "reference_ortho.tif"
-    day_ortho_path = single_day    / f"{new_date}_ortho.tif"
-    ref_stable_dem = extract_stable_terrain_from_dem(
-        dem_path          = ref_dem,
-        ortho_path        = ref_ortho_path,
-        glacier_mask_path = glacier_mask,
-        slope_threshold   = slope_threshold,
-        overwrite         = overwrite_stable,
-    )
-    day_stable_dem = extract_stable_terrain_from_dem(
-        dem_path          = dem,
-        ortho_path        = day_ortho_path,
-        glacier_mask_path = glacier_mask,
-        slope_threshold   = slope_threshold,
-        overwrite         = overwrite_stable,
-    )
-    stable_dod_path = build_dod(
-        ref_dem_path = ref_stable_dem,
-        day_dem_path = day_stable_dem,
-        out_path     = single_day / "DOD_stable.tif",
-        overwrite    = overwrite_stable_dod,
-    )
-    with rasterio.open(stable_dod_path) as src:
-        stable_dod_values = src.read(1)
-    stable_stats = plot_dod_histogram(
-        stable_dod_values,
-        output_dir = single_day,
-        title      = f"stable DoD — {new_date}",
-        filename   = "dod_stable_histogram.png",
-    )
+    # ── Stable-terrain accuracy = Step-3b M3C2 (before/after co-registration) ──
+    # The M3C2 on stable terrain (histogram + spatial map in coreg/m3c2_plots/)
+    # supersedes the old stable-DoD raster, so no DOD_stable.tif is produced.
+    stable_stats = {
+        "median": sfm_result["coreg_med_after"],
+        "nmad":   sfm_result["coreg_nmad_after"],
+        "std":    sfm_result["coreg_std_after"],
+    }
 
     # ── M3C2 distance raster + histogram ─────────────────────────────────
     m3c2_raster_path = m3c2_to_raster(
         ref_las         = ref_ds_path if ref_ds_path.exists() else ref_cloud,
         day_las         = aligned_las,
-        out_path        = single_day / "M3C2_raster.tif",
+        out_path        = single_day / f"{new_date}_M3C2_raster.tif",
         grid_anchor_las = ref_cloud,
         res             = res,
         utm_epsg        = utm_epsg,
@@ -683,13 +664,13 @@ def run_4dsfm_day_with_rasters(
         m3c2_values,
         output_dir = single_day,
         title      = f"M3C2 raster — {new_date}",
-        filename   = "m3c2_raster_histogram.png",
+        filename   = f"{new_date}_m3c2_raster_histogram.png",
     )
 
     print(
         f"\n  [{new_date}] DoD med={dod_stats['median']:+.3f} m  |  "
-        f"stable med={stable_stats['median']:+.3f} m  |  "
-        f"M3C2 med={m3c2_stats['median']:+.3f} m"
+        f"stable M3C2 med={stable_stats['median']:+.3f} m  |  "
+        f"M3C2 raster med={m3c2_stats['median']:+.3f} m"
     )
 
     return {

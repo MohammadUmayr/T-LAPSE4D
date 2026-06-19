@@ -666,7 +666,7 @@ def m3c2_to_raster(
     """Rasterise M3C2 perpendicular distances between two clouds onto a 1 m grid.
 
     Companion to :func:`build_dod` — but instead of vertical ``day_z − ref_z``,
-    each pixel holds the **mean M3C2 distance** between the two clouds at
+    each pixel holds the **median M3C2 distance** between the two clouds at
     that XY location. Because M3C2 measures perpendicular cloud-to-cloud
     separation along the local surface normal (not along Z), the result is
     **immune to the slope-projection inflation** that pollutes vertical DoD
@@ -684,7 +684,7 @@ def m3c2_to_raster(
     3. Each corepoint (= reference cloud point) gets one M3C2 distance.
     4. Bin the corepoint XY positions into a 1 m grid anchored to
        *grid_anchor_las*'s XY bbox (or *ref_las*'s bbox if not given).
-    5. Take the **mean** distance per cell.
+    5. Take the **median** distance per cell.
     6. Write a Float64 GeoTIFF with ``nodata=NaN`` via :func:`save_dem` —
        same format as the DoD raster, so the two stack cleanly in QGIS.
 
@@ -793,12 +793,12 @@ def m3c2_to_raster(
         "col": cols[in_grid],
         "d":   distances[in_grid],
     })
-    print(f"  Binning {len(df):,} valid corepoints into {ny}×{nx} grid (mean per cell) …")
-    means = df.groupby(["row", "col"])["d"].mean()
+    print(f"  Binning {len(df):,} valid corepoints into {ny}×{nx} grid (median per cell) …")
+    medians = df.groupby(["row", "col"])["d"].median()
 
     grid = np.full((ny, nx), np.nan, dtype=np.float64)
-    grid[means.index.get_level_values(0).values,
-         means.index.get_level_values(1).values] = means.values
+    grid[medians.index.get_level_values(0).values,
+         medians.index.get_level_values(1).values] = medians.values
 
     # ── Write GeoTIFF ──────────────────────────────────────────────────
     save_dem(grid, out_path, crs_epsg, transform)
