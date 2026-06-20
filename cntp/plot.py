@@ -125,11 +125,11 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
     # Corner stat blocks coloured to match each histogram: before (green) on
     # the left, after (blue) on the right.
     ax.text(0.03, 0.97,
-            f"Before\nmed:  {med_before:+.3f}\nnmad: {nmad_before:.3f}\nstd:  {std_before:.3f}",
+            f"Before\nmed:  {med_before:+.2f}\nnmad: {nmad_before:.2f}\nstd:  {std_before:.2f}",
             transform=ax.transAxes, va='top', ha='left',
             color=before_color, fontsize=10)
     ax.text(0.97, 0.97,
-            f"After\nmed:  {med_after:+.3f}\nnmad: {nmad_after:.3f}\nstd:  {std_after:.3f}",
+            f"After\nmed:  {med_after:+.2f}\nnmad: {nmad_after:.2f}\nstd:  {std_after:.2f}",
             transform=ax.transAxes, va='top', ha='right',
             color=after_color, fontsize=10)
 
@@ -195,10 +195,10 @@ def plot_dod_histogram(values: np.ndarray,
     fig, ax = plt.subplots()
     ax.hist(v_plot, bins=bins, color='steelblue', alpha=0.8)
     ax.axvline(med, color='tomato', linestyle='--', linewidth=1.5,
-               label=f'median = {med:+.3f} m')
+               label=f'median = {med:+.2f} m')
     ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
-    ax.plot([], [], ' ', label=f'mean   = {mean:+.3f} m')
-    ax.plot([], [], ' ', label=f'std    = {std:.3f} m')
+    ax.plot([], [], ' ', label=f'mean   = {mean:+.2f} m')
+    ax.plot([], [], ' ', label=f'std    = {std:.2f} m')
     ax.plot([], [], ' ', label=f'n      = {v.size:,}')
     ax.set_xlabel('DoD (m)')
     ax.set_ylabel('Count')

@@ -345,7 +345,7 @@ def run_4dsfm_day(
         epoch_tba = py4dgeo.Epoch(stable_tba_cloud[:, :3])
         epoch_val = py4dgeo.Epoch(val_stable_arr[:, :3])
         validation_med, validation_nmad, validation_std, dist_val = run_m3c2(epoch_tba, epoch_val)
-        print(f"  M3C2  median: {validation_med:+.4f} m  nmad: {validation_nmad:.4f} m  std: {validation_std:.4f} m")
+        print(f"  M3C2  median: {validation_med:+.2f} m  nmad: {validation_nmad:.2f} m  std: {validation_std:.2f} m")
 
         val_plot_dir = val_dir / "validation_plots"
         val_plot_dir.mkdir(parents=True, exist_ok=True)
@@ -357,7 +357,7 @@ def run_4dsfm_day(
         fig, ax = plt.subplots()
         ax.hist(d_plot, bins=60, color="steelblue", alpha=0.8)
         ax.axvline(validation_med, color="tomato", linestyle="--", linewidth=1.5,
-                   label=f"median = {validation_med:+.4f} m  nmad = {validation_nmad:.4f} m")
+                   label=f"median = {validation_med:+.2f} m  nmad = {validation_nmad:.2f} m")
         ax.axvline(0, color="black", linewidth=0.8, linestyle=":")
         ax.set_xlabel("M3C2 distance (m)")
         ax.set_ylabel("Count")
@@ -684,9 +684,9 @@ def run_4dsfm_day_with_rasters(
     )
 
     print(
-        f"\n  [{new_date}] DoD med={dod_stats['median']:+.3f} m  |  "
-        f"stable M3C2 med={stable_stats['median']:+.3f} m  |  "
-        f"M3C2 raster med={m3c2_stats['median']:+.3f} m"
+        f"\n  [{new_date}] DoD med={dod_stats['median']:+.2f} m  |  "
+        f"stable M3C2 med={stable_stats['median']:+.2f} m  |  "
+        f"M3C2 raster med={m3c2_stats['median']:+.2f} m"
     )
 
     return {

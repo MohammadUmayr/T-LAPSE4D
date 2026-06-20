@@ -897,8 +897,8 @@ def evaluate_coreg(
     med_b, nmad_b, std_b, dist_b = run_m3c2(epoch_ref, epoch_before)
     med_a, nmad_a, std_a, dist_a = run_m3c2(epoch_ref, epoch_after)
 
-    print(f"  Before — median: {med_b:+.4f} m  nmad: {nmad_b:.4f} m  std: {std_b:.4f} m")
-    print(f"  After  — median: {med_a:+.4f} m  nmad: {nmad_a:.4f} m  std: {std_a:.4f} m")
+    print(f"  Before — median: {med_b:+.2f} m  nmad: {nmad_b:.2f} m  std: {std_b:.2f} m")
+    print(f"  After  — median: {med_a:+.2f} m  nmad: {nmad_a:.2f} m  std: {std_a:.2f} m")
 
     if stable_dir is not None:
         stable_dir = Path(stable_dir)

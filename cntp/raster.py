@@ -775,7 +775,7 @@ def m3c2_to_raster(
         cyl_radius   = cyl_radius,
         max_distance = max_distance,
     )
-    print(f"  M3C2 over all corepoints: median={med:+.4f} m   std={std:.4f} m")
+    print(f"  M3C2 over all corepoints: median={med:+.2f} m   std={std:.2f} m")
 
     # ── Bin corepoints → mean per cell ─────────────────────────────────
     xs = ref_arr[:, 0]
