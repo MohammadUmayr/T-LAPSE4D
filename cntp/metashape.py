@@ -14,9 +14,12 @@ functions that need it, so this module (and non-Metashape helpers like
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import sys
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +38,62 @@ else:
         import Metashape
     except ImportError:
         Metashape = None
+
+# ---------------------------------------------------------------------------
+# Native-output control
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def _quiet_metashape(verbose: bool, log_path: "str | Path | None" = None):
+    """Route Metashape's native processing chatter to a log file unless ``verbose``.
+
+    Metashape's progress bars, tie-point counts and timing lines are written by
+    the C++ library straight to the process's stdout/stderr file descriptors, so
+    gating Python ``print`` calls can't hide them. When ``verbose`` is False this
+    redirects fd 1 & 2 to ``log_path`` (appended) for the duration of the wrapped
+    call — the library output is captured to the file while our own ``print``
+    summaries (emitted outside the wrapped block) still reach the console. When
+    True it is a no-op, so the full Metashape log is shown inline. With no
+    ``log_path`` the captured output is discarded (``os.devnull``).
+    """
+    if verbose:
+        yield
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if log_path is None:
+        target, flags = os.devnull, os.O_WRONLY
+    else:
+        target = os.fspath(log_path)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    fd = os.open(target, flags, 0o644)
+    saved_out, saved_err = os.dup(1), os.dup(2)
+    try:
+        os.dup2(fd, 1)
+        os.dup2(fd, 2)
+        yield
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(saved_out, 1)
+        os.dup2(saved_err, 2)
+        os.close(fd)
+        os.close(saved_out)
+        os.close(saved_err)
+
+
+def _init_native_log(verbose: bool, log_path: "Path | None") -> "Path | None":
+    """Truncate/create the native-output log once at the start of a step.
+
+    Returns the path to pass to :func:`_quiet_metashape` for each heavy call
+    (``None`` when ``verbose`` so the context manager stays a no-op).
+    """
+    if verbose or log_path is None:
+        return None
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("")  # fresh file per step run
+    return log_path
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -827,6 +886,7 @@ def run_multitemporal_ba(
     match_downscale: int = 1,
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
+    verbose: bool = False,
 ) -> tuple[Path, Path]:
     """Run multi-temporal bundle adjustment combining all reference + new day images.
 
@@ -870,6 +930,9 @@ def run_multitemporal_ba(
     sfm_dir  = output_dir / "output" / date / "4D_SfM"
     sfm_dir.mkdir(parents=True, exist_ok=True)
     psx_path = sfm_dir / f"{date}_4DSfM.psx"
+
+    # Native Metashape chatter → 4D_SfM/<date>_metashape.log unless verbose.
+    native_log = _init_native_log(verbose, sfm_dir / f"{date}_metashape.log")
 
     reg_df = pd.read_csv(reference_registry_csv)
     reg_df["date"] = reg_df["date"].map(_normalize_date)
@@ -967,16 +1030,18 @@ def run_multitemporal_ba(
 
     # ── Bundle adjustment ─────────────────────────────────────────────────
     print("  Matching photos ...", flush=True)
-    chunk.matchPhotos(
-        downscale=match_downscale,
-        keypoint_limit=80000,
-        tiepoint_limit=8000,
-        generic_preselection=True,
-        reference_preselection=False,
-    )
+    with _quiet_metashape(verbose, native_log):
+        chunk.matchPhotos(
+            downscale=match_downscale,
+            keypoint_limit=80000,
+            tiepoint_limit=8000,
+            generic_preselection=True,
+            reference_preselection=False,
+        )
 
     print("  Aligning cameras ...", flush=True)
-    chunk.alignCameras(adaptive_fitting=False)
+    with _quiet_metashape(verbose, native_log):
+        chunk.alignCameras(adaptive_fitting=False)
     doc.save()
 
     aligned = sum(1 for c in chunk.cameras if c.transform)
@@ -984,15 +1049,31 @@ def run_multitemporal_ba(
     if aligned == 0:
         raise RuntimeError(f"No cameras aligned in 4D SfM BA for {date}.")
 
+    # Step 1 never aborts on partial alignment (Step 2 may still recover the
+    # cameras and enforces the cloud-cover gate). But if any new-day camera
+    # failed to align, record which ones to a text file in the 4D_SfM folder —
+    # written only when there is something to report.
+    unaligned = [c.label for c in chunk.cameras if date in c.label and not c.transform]
+    if unaligned:
+        report = sfm_dir / f"{date}_unaligned_step1.txt"
+        report.write_text(
+            f"{date} multi-temporal BA (Step 1): "
+            f"{len(unaligned)}/{n_new} new-day cameras unaligned\n"
+            + "\n".join(unaligned) + "\n"
+        )
+        print(f"  NOTE: {len(unaligned)}/{n_new} new-day cameras unaligned in "
+              f"Step 1 → {report.name}", flush=True)
+
     print("  Optimising cameras ...", flush=True)
-    chunk.optimizeCameras(
-        fit_f=True, fit_cx=True, fit_cy=True,
-        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
-        fit_p1=True, fit_p2=True,
-        fit_b1=False, fit_b2=False,
-        adaptive_fitting=False,
-        tiepoint_covariance=True,
-    )
+    with _quiet_metashape(verbose, native_log):
+        chunk.optimizeCameras(
+            fit_f=True, fit_cx=True, fit_cy=True,
+            fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
+            fit_p1=True, fit_p2=True,
+            fit_b1=False, fit_b2=False,
+            adaptive_fitting=False,
+            tiepoint_covariance=True,
+        )
     doc.save()
 
     # ── Exports ───────────────────────────────────────────────────────────
@@ -1023,6 +1104,8 @@ def run_single_day_fixed_iop(
     filter_mode: str = "Mild",
     loc_acc: tuple = (0.5, 0.5, 0.5),
     rot_acc: tuple = (5.0, 5.0, 5.0),
+    verbose: bool = False,
+    max_unaligned: int = 10,
 ) -> tuple[Path, Path]:
     """Single-day re-run with IOP fixed and EOP loose.
 
@@ -1072,6 +1155,9 @@ def run_single_day_fixed_iop(
     day_dir.mkdir(parents=True, exist_ok=True)
     psx_path = day_dir / f"{date}.psx"
 
+    # Native Metashape chatter → single_day/<date>_metashape.log unless verbose.
+    native_log = _init_native_log(verbose, day_dir / f"{date}_metashape.log")
+
     n_imgs = sum(len(v) for v in date_images.values())
     print(f"\n{'='*60}", flush=True)
     print(f"  Single-day BA (fixed IOP) : {date}   ({n_imgs} images)", flush=True)
@@ -1115,41 +1201,61 @@ def run_single_day_fixed_iop(
 
     # ── Bundle adjustment ─────────────────────────────────────────────────
     print("  Matching photos ...", flush=True)
-    chunk.matchPhotos(
-        downscale=match_downscale,
-        keypoint_limit=80000,
-        tiepoint_limit=8000,
-        generic_preselection=True,
-        reference_preselection=False,
-    )
+    with _quiet_metashape(verbose, native_log):
+        chunk.matchPhotos(
+            downscale=match_downscale,
+            keypoint_limit=80000,
+            tiepoint_limit=8000,
+            generic_preselection=True,
+            reference_preselection=False,
+        )
 
     print("  Aligning cameras ...", flush=True)
-    chunk.alignCameras(adaptive_fitting=False)
+    with _quiet_metashape(verbose, native_log):
+        chunk.alignCameras(adaptive_fitting=False)
     doc.save()
 
-    aligned = sum(1 for c in chunk.cameras if c.transform)
+    aligned   = sum(1 for c in chunk.cameras if c.transform)
+    unaligned = len(chunk.cameras) - aligned
     print(f"  Aligned {aligned}/{len(chunk.cameras)} cameras", flush=True)
     if aligned == 0:
         raise RuntimeError(f"No cameras aligned in single-day BA for {date}.")
 
+    # Cloud-cover gate: abort before the costly dense build when too many of the
+    # day's cameras failed to align (heavy cloud → many unaligned frames).
+    if unaligned >= max_unaligned:
+        raise RuntimeError(
+            f"{date}: {unaligned}/{len(chunk.cameras)} cameras unaligned "
+            f"(>= max_unaligned={max_unaligned}) — likely cloud cover; skipping date."
+        )
+
+    # `matched` = this day's cameras Step 1 aligned & exported to the CSV. If
+    # Step 2 aligned more, it recovered cameras Step 1 missed — surface that.
+    if aligned > matched:
+        print(f"  NOTE: Step 2 aligned {aligned - matched} camera(s) that Step 1 "
+              f"did not (Step 1 aligned {matched}/{len(chunk.cameras)}).", flush=True)
+
     print("  Optimising cameras (IOP fixed) ...", flush=True)
-    chunk.optimizeCameras(
-        fit_f=True, fit_cx=True, fit_cy=True,
-        fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
-        fit_p1=True, fit_p2=True,
-        fit_b1=False, fit_b2=False,
-        adaptive_fitting=False,
-        tiepoint_covariance=True,
-    )
+    with _quiet_metashape(verbose, native_log):
+        chunk.optimizeCameras(
+            fit_f=True, fit_cx=True, fit_cy=True,
+            fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False,
+            fit_p1=True, fit_p2=True,
+            fit_b1=False, fit_b2=False,
+            adaptive_fitting=False,
+            tiepoint_covariance=True,
+        )
     doc.save()
 
     # ── Dense point cloud ─────────────────────────────────────────────────
     _filter = {"Mild": Metashape.MildFiltering, "Moderate": Metashape.ModerateFiltering,
                "Aggressive": Metashape.AggressiveFiltering}
     print(f"  Building depth maps (filter={filter_mode}) ...", flush=True)
-    chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=_filter[filter_mode])
+    with _quiet_metashape(verbose, native_log):
+        chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=_filter[filter_mode])
     print("  Building point cloud ...", flush=True)
-    chunk.buildPointCloud()
+    with _quiet_metashape(verbose, native_log):
+        chunk.buildPointCloud()
     doc.save()
 
     # ── Exports ───────────────────────────────────────────────────────────
@@ -1158,13 +1264,14 @@ def run_single_day_fixed_iop(
     # write inside the coreg step).
     cloud_path = day_dir / f"{date}_cloud.las"
     utm_crs    = Metashape.CoordinateSystem(f"EPSG::{utm_epsg}")
-    chunk.exportPointCloud(
-        str(cloud_path),
-        source_data=Metashape.PointCloudData,
-        format=Metashape.PointCloudFormatLAS,
-        crs=utm_crs,
-        save_point_color=True,
-    )
+    with _quiet_metashape(verbose, native_log):
+        chunk.exportPointCloud(
+            str(cloud_path),
+            source_data=Metashape.PointCloudData,
+            format=Metashape.PointCloudFormatLAS,
+            crs=utm_crs,
+            save_point_color=True,
+        )
     print(f"  Exported LAS : {cloud_path.name}  (EPSG:{utm_epsg})", flush=True)
 
     cameras_csv_out = day_dir / f"{date}_cameras.csv"

@@ -65,6 +65,7 @@ def run_4dsfm_day(
     stop_after_ba: bool = False,
     add_to_registry: bool = True,
     run_validation: bool = True,
+    max_unaligned: int = 10,
 ) -> dict:
     """Run the full 4D SfM pipeline for *new_date*.
 
@@ -189,6 +190,7 @@ def run_4dsfm_day(
             match_downscale        = match_downscale,
             loc_acc_new            = loc_acc_new,
             rot_acc_new            = rot_acc_new,
+            verbose                = verbose,
         )
     else:
         print(f"[Step 1] Skipping — {cameras_4dsfm_csv.name} exists")
@@ -212,6 +214,8 @@ def run_4dsfm_day(
             filter_mode     = filter_mode,
             loc_acc         = loc_acc_new,
             rot_acc         = rot_acc_new,
+            verbose         = verbose,
+            max_unaligned   = max_unaligned,
         )
     else:
         print(f"[Step 2] Skipping — {tba_las_path.name} exists")
@@ -431,6 +435,7 @@ def run_4dsfm_day_with_rasters(
     verbose: bool = False,
     add_to_registry: bool = True,
     run_validation: bool = True,
+    max_unaligned: int = 10,
     # ── Raster knobs ──────────────────────────────────────────────────────
     res: float = 1.0,
     max_gap_pixels: int = 1,
@@ -561,6 +566,7 @@ def run_4dsfm_day_with_rasters(
         verbose         = verbose,
         add_to_registry = add_to_registry,
         run_validation  = run_validation,
+        max_unaligned   = max_unaligned,
     )
 
     # ── Resolve shared paths + CRS ───────────────────────────────────────

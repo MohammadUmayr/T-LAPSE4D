@@ -21,7 +21,7 @@ def plot_stable_terrain_geometry(stable_points, output_dir, filename="stable_ter
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
     ax.view_init(elev=30, azim=30)
-    plt.title('Zones de terrain stable extraites géométriquement')
+    plt.title('Geometrically extracted stable terrain')
     plt.savefig(Path(output_dir) / filename, dpi=150, bbox_inches='tight')
     plt.close(fig)
 
@@ -50,7 +50,7 @@ def plot_ndwi_vs_intensity(ndwi, grayscale_intensity, colors, line_a, line_b, ou
     plt.close(fig)
 
 
-def plot_stable_terrain_rgb(stable_points, output_dir, title='Zone de terrain stable',
+def plot_stable_terrain_rgb(stable_points, output_dir, title='Stable terrain',
                             filename="stable_terrain_rgb.png", elev=15, azim=-90):
     """3D scatter plot of stable terrain colored by RGB.
 
@@ -58,12 +58,28 @@ def plot_stable_terrain_rgb(stable_points, output_dir, title='Zone de terrain st
     near-frontal view — looking along Northing so Easting × Elevation faces the
     viewer — so the terrain always appears from the front regardless of site.
     """
+    from matplotlib.ticker import MaxNLocator
+
+    # Subtract a local origin so the Easting/Northing ticks are short offsets
+    # (0..extent) instead of full 6-7 digit UTM values — the long northings
+    # otherwise clutter the tilted 3-D axis. The label records the origin.
+    x0 = float(np.floor(np.nanmin(stable_points[:, 0])))
+    y0 = float(np.floor(np.nanmin(stable_points[:, 1])))
+
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(stable_points[:, 0], stable_points[:, 1], stable_points[:, 2], c=stable_points[:, 3:6] / 255, marker='.')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
+    ax.scatter(stable_points[:, 0] - x0, stable_points[:, 1] - y0, stable_points[:, 2],
+               c=stable_points[:, 3:6] / 255, marker='.')
+    ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
+    ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
+    ax.set_zlabel('Elevation (m)')
+
+    # De-clutter: few ticks per axis + small font.
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.zaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.tick_params(labelsize=7)
+
     plt.title(title)
     ax.view_init(elev=elev, azim=azim)
     plt.savefig(Path(output_dir) / filename, dpi=150, bbox_inches='tight')
@@ -72,12 +88,15 @@ def plot_stable_terrain_rgb(stable_points, output_dir, title='Zone de terrain st
 
 def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
                         output_dir=None, title: str = '',
-                        filename: str = "m3c2_distances.png") -> None:
+                        filename: str = "m3c2_distances.png",
+                        xlim: float = 4.0) -> None:
     """Histogram of M3C2 distances before and after co-registration.
 
-    Stats in the label are computed on the full un-clipped distance array.
-    Histogram bins are clipped to ±3σ of the *before* distribution so a few
-    outliers don't squash the x-axis.
+    Before is drawn green (left stat block), after blue (right stat block);
+    each block reports med/nmad/std computed on the full un-clipped distance
+    array. The x-axis is fixed to ±``xlim`` m with constant 0.1 m bins so the
+    range and bin width don't drift day-to-day — figures stack cleanly across a
+    time series. Distances beyond ±``xlim`` are dropped from the bars only.
     """
     d_before = dist_before[~np.isnan(dist_before)]
     d_after  = dist_after[~np.isnan(dist_after)]
@@ -86,31 +105,38 @@ def plot_m3c2_distances(dist_before: np.ndarray, dist_after: np.ndarray,
     med_after   = float(np.median(d_after))
     nmad_before = float(1.4826 * np.median(np.abs(d_before - med_before)))
     nmad_after  = float(1.4826 * np.median(np.abs(d_after  - med_after)))
-    mean_before = float(np.mean(d_before))
-    mean_after  = float(np.mean(d_after))
     std_before  = float(np.std(d_before))
     std_after   = float(np.std(d_after))
 
-    clip = 3 * std_before   # wide enough that no spike forms at the boundary
+    clip  = xlim                              # fixed window → same x-axis every day
+    edges = np.arange(-clip, clip + 1e-9, 0.1)   # constant 0.1 m bins
     d_before_plot = d_before[np.abs(d_before) <= clip]
     d_after_plot  = d_after[np.abs(d_after)   <= clip]
 
+    before_color, after_color = 'steelblue', 'tomato'
+
     fig, ax = plt.subplots()
-    ax.hist(d_before_plot, bins=60, alpha=0.5, label='before', color='steelblue')
-    ax.hist(d_after_plot,  bins=60, alpha=0.5, label='after',  color='tomato')
-    ax.axvline(med_before, color='steelblue', linestyle='--', linewidth=1.2,
-               label=f'med before = {med_before:+.3f} m')
-    ax.axvline(med_after, color='tomato', linestyle='--', linewidth=1.2,
-               label=f'med after  = {med_after:+.3f} m')
-    ax.plot([], [], ' ', label=f'nmad before = {nmad_before:.3f} m')
-    ax.plot([], [], ' ', label=f'nmad after  = {nmad_after:.3f} m')
-    ax.plot([], [], ' ', label=f'std before  = {std_before:.3f} m')
-    ax.plot([], [], ' ', label=f'std after   = {std_after:.3f} m')
+    ax.hist(d_before_plot, bins=edges, alpha=0.5, color=before_color)
+    ax.hist(d_after_plot,  bins=edges, alpha=0.5, color=after_color)
+    ax.axvline(med_before, color=before_color, linestyle='--', linewidth=1.2)
+    ax.axvline(med_after,  color=after_color,  linestyle='--', linewidth=1.2)
     ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
+
+    # Corner stat blocks coloured to match each histogram: before (green) on
+    # the left, after (blue) on the right.
+    ax.text(0.03, 0.97,
+            f"Before\nmed:  {med_before:+.3f}\nnmad: {nmad_before:.3f}\nstd:  {std_before:.3f}",
+            transform=ax.transAxes, va='top', ha='left',
+            color=before_color, fontsize=10)
+    ax.text(0.97, 0.97,
+            f"After\nmed:  {med_after:+.3f}\nnmad: {nmad_after:.3f}\nstd:  {std_after:.3f}",
+            transform=ax.transAxes, va='top', ha='right',
+            color=after_color, fontsize=10)
+
+    ax.set_xlim(-clip, clip)
     ax.set_xlabel('M3C2 distance (m)')
     ax.set_ylabel('Count')
-    ax.set_title(f'M3C2 distances — {title}')
-    ax.legend(fontsize=8)
+    ax.set_title(f'M3C2 distances on stable terrain — {title}')
     plt.tight_layout()
     if output_dir is None:
         plt.show()
@@ -214,7 +240,7 @@ def plot_stable_terrain_diagnostics(stable_slope: np.ndarray,
     _plot_if_missing(overwrite, output_dir / "stable_terrain_rgb.png",
                      lambda: plot_stable_terrain_rgb(
                          stable_final, output_dir,
-                         title=f'Zone de terrain stable - {title}',
+                         title=f'Stable terrain — {title}',
                          filename='stable_terrain_rgb.png'))
 
 
@@ -226,7 +252,7 @@ def plot_m3c2_spatial(
     title: str = '',
     filename: str = "m3c2_spatial.png",
     res: float = 1.0,
-    vmax: float = None,
+    vmax: float = 3.0,
     cbar_label: str = 'M3C2 distance (m)',
     save_pdf: bool = True,
     layout: str = 'auto',
@@ -250,8 +276,9 @@ def plot_m3c2_spatial(
     res:
         Ground cell size in metres (default 1.0). Bin counts follow the extent.
     vmax:
-        Symmetric colour limit [m]; defaults to the 95th percentile of
-        ``|dist_before|``.
+        Symmetric colour limit [m]; fixed at 3.0 by default so the scale is
+        constant across dates. Pass ``None`` for the per-day 95th-percentile
+        of ``|dist_before|``.
     layout:
         ``'auto'`` (default) stacks panels vertically for wide/short footprints
         and places them side-by-side otherwise; force with ``'vertical'`` /

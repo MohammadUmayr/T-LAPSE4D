@@ -911,7 +911,7 @@ def evaluate_coreg(
         # date tag from the coreg cloud name (e.g. "2024-01-18_cloud_coreg_hsfm")
         date_tag = Path(tba_after_las).stem.split("_cloud")[0]
         plot_m3c2_distances(dist_b, dist_a, plot_dir,
-                            title=f"Stable-terrain M3C2 — {date_tag}",
+                            title=date_tag,
                             filename=f"{date_tag}_m3c2_distances.png")
         plot_m3c2_spatial(ref_stable, dist_b, dist_a, output_dir=plot_dir,
                           title=f"Stable-terrain M3C2 — {date_tag}",
