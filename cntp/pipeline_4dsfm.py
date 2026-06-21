@@ -301,6 +301,16 @@ def run_4dsfm_day(
         )
     else:
         print("[Step 3b] Skipping — stable TBA exists")
+        # Reload the persisted coreg stats so the stable-terrain M3C2 numbers
+        # aren't NaN on a cached re-run (Step 3b is what normally sets them;
+        # evaluate_coreg wrote them to coreg/<date>_m3c2_stats.csv).
+        stats_csv = coreg_dir / f"{new_date}_m3c2_stats.csv"
+        if stats_csv.exists():
+            _s = pd.read_csv(stats_csv, index_col="coreg")
+            coreg_med_before = float(_s.loc["before", "median"])
+            coreg_med_after  = float(_s.loc["after",  "median"])
+            coreg_nmad_after = float(_s.loc["after",  "nmad"])
+            coreg_std_after  = float(_s.loc["after",  "std"])
 
     # ── Step 4: apply transform to camera EOPs ───────────────────────────
     if overwrite or not cameras_coreg_csv.exists():
