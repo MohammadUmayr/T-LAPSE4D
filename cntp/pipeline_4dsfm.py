@@ -200,8 +200,21 @@ def run_4dsfm_day(
         return None
 
     # ── Step 2: single-day fixed-IOP reconstruction ──────────────────────
-    if overwrite or not tba_las_path.exists():
+    # A previous run that hit the cloud-cover gate leaves a skip marker (no
+    # cloud is written). Honour it so re-runs don't redo the futile alignment;
+    # overwrite=True forces a retry and clears the marker.
+    tba_skip_marker = single_dir / f"{new_date}_unaligned_skip.txt"
+    if tba_las_path.exists() and not overwrite:
+        print(f"[Step 2] Skipping — {tba_las_path.name} exists")
+    elif tba_skip_marker.exists() and not overwrite:
+        raise RuntimeError(
+            f"{new_date}: skipped earlier by the cloud-cover gate "
+            f"({tba_skip_marker.name}); pass overwrite=True to retry."
+        )
+    else:
         print(f"\n[Step 2] Single-day fixed IOP — {new_date}")
+        if tba_skip_marker.exists():
+            tba_skip_marker.unlink()   # retrying (overwrite) — clear stale marker
         tba_las_path, cameras_csv = run_single_day_fixed_iop(
             date            = new_date,
             date_images     = date_images,
@@ -217,8 +230,6 @@ def run_4dsfm_day(
             verbose         = verbose,
             max_unaligned   = max_unaligned,
         )
-    else:
-        print(f"[Step 2] Skipping — {tba_las_path.name} exists")
 
     # ── Stable reference (shared cache across all days) ──────────────────
     # Downsampled ref + glacier-masked, slope/NDWI-filtered stable ref live

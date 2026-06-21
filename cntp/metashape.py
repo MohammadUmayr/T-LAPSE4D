@@ -1222,8 +1222,15 @@ def run_single_day_fixed_iop(
         raise RuntimeError(f"No cameras aligned in single-day BA for {date}.")
 
     # Cloud-cover gate: abort before the costly dense build when too many of the
-    # day's cameras failed to align (heavy cloud → many unaligned frames).
+    # day's cameras failed to align (heavy cloud → many unaligned frames). Drop a
+    # skip marker so a re-run doesn't redo the (now-known-futile) alignment — the
+    # pipeline checks for it and fast-skips the date unless overwrite is set.
     if unaligned >= max_unaligned:
+        skip_marker = day_dir / f"{date}_unaligned_skip.txt"
+        skip_marker.write_text(
+            f"{date}: {unaligned}/{len(chunk.cameras)} cameras unaligned "
+            f"(>= max_unaligned={max_unaligned}) — cloud-cover gate, Step 2 not run.\n"
+        )
         raise RuntimeError(
             f"{date}: {unaligned}/{len(chunk.cameras)} cameras unaligned "
             f"(>= max_unaligned={max_unaligned}) — likely cloud cover; skipping date."
