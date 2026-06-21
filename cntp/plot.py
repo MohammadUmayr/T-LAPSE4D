@@ -70,8 +70,11 @@ def plot_stable_terrain_rgb(stable_points, output_dir, title='Stable terrain',
     ax = fig.add_subplot(111, projection='3d')
     ax.scatter(stable_points[:, 0] - x0, stable_points[:, 1] - y0, stable_points[:, 2],
                c=stable_points[:, 3:6] / 255, marker='.')
-    ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
-    ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
+    # Axes show metres relative to the SW origin (short ticks); the origin
+    # itself is noted once in the corner so the axis labels stay short and
+    # don't run off the tilted 3-D frame.
+    ax.set_xlabel('Easting (m)')
+    ax.set_ylabel('Northing (m)')
     ax.set_zlabel('Elevation (m)')
 
     # De-clutter: few ticks per axis + small font.
@@ -81,6 +84,8 @@ def plot_stable_terrain_rgb(stable_points, output_dir, title='Stable terrain',
     ax.tick_params(labelsize=7)
 
     plt.title(title)
+    fig.text(0.01, 0.01, f"origin: E {x0:,.0f}  N {y0:,.0f} (m)",
+             fontsize=7, color='0.4')
     ax.view_init(elev=elev, azim=azim)
     plt.savefig(Path(output_dir) / filename, dpi=150, bbox_inches='tight')
     plt.close(fig)
