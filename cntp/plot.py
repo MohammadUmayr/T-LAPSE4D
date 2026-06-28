@@ -392,3 +392,181 @@ def plot_m3c2_spatial(
             fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
         plt.close(fig)
         print(f"  Saved: {out / filename}")
+
+
+def plot_m3c2_coreg_and_signal(
+    ref_stable: np.ndarray,
+    dist_before: np.ndarray,
+    dist_after: np.ndarray,
+    signal: np.ndarray,
+    signal_extent,
+    output_dir=None,
+    title: str = '',
+    filename: str = "m3c2_coreg_and_signal.png",
+    res: float = 1.0,
+    vmax: float = 4.0,
+    signal_origin: str = 'upper',
+    cbar_label: str = 'M3C2 distance (m)',
+    save_pdf: bool = True,
+) -> None:
+    """2×2 figure: before/after coreg maps + signal map + stable-terrain histogram.
+
+    Top row = stable-terrain M3C2 residual maps **before** vs **after**
+    co-registration (the QC / uncertainty, binned like :func:`plot_m3c2_spatial`).
+    Bottom-left = the reference→day M3C2 **signal** raster (the surface change).
+    The three maps share one diverging colour scale + colorbar, so the
+    after-coreg residual reads as near-zero next to the signal. Bottom-right =
+    the **distribution** of the stable-terrain M3C2 distances (before/after),
+    with its x-axis fixed to ±``vmax`` so it lines up with the map colours.
+
+    Parameters
+    ----------
+    ref_stable, dist_before, dist_after :
+        Corepoint coords (cols 0/1 = easting/northing) and the before/after M3C2
+        distances on stable terrain (from :func:`cntp.asp.evaluate_coreg`).
+    signal :
+        2-D M3C2 signal raster (NaN where no data), e.g. ``<date>_M3C2_raster.tif``.
+    signal_extent :
+        ``(xmin, xmax, ymin, ymax)`` of ``signal`` in the cloud's UTM CRS.
+    signal_origin :
+        ``'upper'`` (GeoTIFF/rasterio row 0 = north, default) or ``'lower'``.
+    vmax :
+        Symmetric colour limit [m] shared by all three panels (default ±4 m, so
+        the scale is identical across dates and the coreg panels stay readable;
+        signal beyond ±vmax saturates with extend arrows). Pass ``None`` to use
+        the 95th percentile of ``|signal|`` instead.
+    """
+    import matplotlib.pyplot as plt
+    from scipy.stats import binned_statistic_2d
+
+    plt.rcParams.update({
+        'font.family': 'serif', 'font.size': 12, 'axes.titlesize': 13,
+        'axes.labelsize': 12, 'xtick.labelsize': 10, 'ytick.labelsize': 10,
+        'axes.linewidth': 0.8, 'mathtext.fontset': 'cm',
+    })
+
+    x, y = ref_stable[:, 0], ref_stable[:, 1]
+    # Common SW origin across the stable patches and the (larger) signal extent,
+    # so all three panels share short, comparable offset tick labels.
+    x0 = float(np.floor(min(np.nanmin(x), signal_extent[0])))
+    y0 = float(np.floor(min(np.nanmin(y), signal_extent[2])))
+
+    xr, yr = x - x0, y - y0
+    rng = [[float(xr.min()), float(xr.max())], [float(yr.min()), float(yr.max())]]
+    nx = max(int(np.ceil((rng[0][1] - rng[0][0]) / res)), 1)
+    ny = max(int(np.ceil((rng[1][1] - rng[1][0]) / res)), 1)
+
+    def _grid(dist):
+        mask = ~np.isnan(dist)
+        if mask.sum() < 4:
+            return np.full((ny, nx), np.nan)
+        stat, _, _, _ = binned_statistic_2d(
+            xr[mask], yr[mask], dist[mask],
+            statistic='median', bins=[nx, ny], range=rng,
+        )
+        return stat.T
+
+    stable_extent = [rng[0][0], rng[0][1], rng[1][0], rng[1][1]]
+    g_before, g_after = _grid(dist_before), _grid(dist_after)
+
+    sx0, sx1, sy0, sy1 = signal_extent
+    sig_extent = [sx0 - x0, sx1 - x0, sy0 - y0, sy1 - y0]
+
+    # One shared colour scale for all three panels (default ±4 m); signal beyond
+    # it saturates (extend arrows). Pass vmax=None for a per-figure auto range.
+    if vmax is None:
+        v = signal[np.isfinite(signal)]
+        vmax = float(np.percentile(np.abs(v), 95)) if v.size else 1.0
+    vmax = max(vmax, 0.01)
+
+    # Crop each panel to ITS OWN data (robust 0.5–99.5th percentile) so every
+    # raster fills its box with no empty right-hand margin: the coreg panels to
+    # the stable-terrain extent, the signal panel to the glacier extent. (Stray
+    # far points/cells are ignored by the percentile.)
+    H, W = signal.shape
+    xs = np.linspace(sig_extent[0], sig_extent[1], W)
+    ys = (np.linspace(sig_extent[2], sig_extent[3], H) if signal_origin == 'lower'
+          else np.linspace(sig_extent[3], sig_extent[2], H))
+    fr, fc = np.where(np.isfinite(signal))
+
+    def _lim(a, pad=0.08):
+        if not a.size:
+            return None
+        lo, hi = np.percentile(a, 0.5), np.percentile(a, 99.5)
+        m = pad * (hi - lo)
+        return (lo - m, hi + m)
+
+    # One shared "glacier frame" for all three maps = the signal (glacier)
+    # extent, so the panels are spatially aligned. Stable terrain is drawn in
+    # the same frame; where it's absent (e.g. the accumulation zone) the coreg
+    # panels are legitimately blank — same binning as plot_m3c2_spatial, just a
+    # wider frame than that per-date QC plot uses.
+    common_xlim, common_ylim = _lim(xs[fc]), _lim(ys[fr])
+
+    # ── 2×2 figure: 3 maps (before / after coreg + signal) + a stable-terrain
+    # M3C2 histogram. Balanced grid → readable for any glacier shape.
+    fig, axes = plt.subplots(2, 2, figsize=(15, 8.5), constrained_layout=True)
+    ax_before, ax_after = axes[0]
+    ax_signal, ax_hist = axes[1]
+
+    maps = [
+        (ax_before, g_before, stable_extent, 'lower',       'Stable terrain — before co-registration'),
+        (ax_after,  g_after,  stable_extent, 'lower',       'Stable terrain — after co-registration'),
+        (ax_signal, signal,   sig_extent,    signal_origin, 'Glacier-wide surface change (reference → day)'),
+    ]
+    im = None
+    for ax, data, extent, origin, label in maps:
+        # aspect='auto' fills the box; the shared glacier frame keeps all three
+        # panels on the same spatial extent.
+        im = ax.imshow(data, origin=origin, extent=extent, cmap='RdBu',
+                       vmin=-vmax, vmax=vmax, aspect='auto')
+        if common_xlim:
+            ax.set_xlim(common_xlim)
+        if common_ylim:
+            ax.set_ylim(common_ylim)
+        ax.set_title(label)
+        ax.set_xlabel(f'Easting $-$ {x0:,.0f} (m)')
+        ax.set_ylabel(f'Northing $-$ {y0:,.0f} (m)')
+
+    cb = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, pad=0.02,
+                      extend='both', location='right')
+    cb.set_label(cbar_label)
+
+    # 4th panel — distribution of the stable-terrain M3C2 distances (before vs
+    # after); x-axis fixed to ±vmax so it reads on the same scale as the map
+    # colours (steelblue = before, tomato = after).
+    db = dist_before[~np.isnan(dist_before)]
+    da = dist_after[~np.isnan(dist_after)]
+    mb, ma = float(np.median(db)), float(np.median(da))
+    nb = float(1.4826 * np.median(np.abs(db - mb)))
+    na = float(1.4826 * np.median(np.abs(da - ma)))
+    sb, sa = float(np.std(db)), float(np.std(da))
+    edges = np.arange(-vmax, vmax + 1e-9, max(vmax / 40.0, 0.05))
+    ax_hist.hist(db[np.abs(db) <= vmax], bins=edges, alpha=0.5, color='steelblue')
+    ax_hist.hist(da[np.abs(da) <= vmax], bins=edges, alpha=0.5, color='tomato')
+    ax_hist.axvline(mb, color='steelblue', linestyle='--', linewidth=1.2)
+    ax_hist.axvline(ma, color='tomato', linestyle='--', linewidth=1.2)
+    ax_hist.axvline(0, color='black', linewidth=0.8, linestyle=':')
+    ax_hist.set_xlim(-vmax, vmax)
+    ax_hist.set_xlabel(cbar_label)
+    ax_hist.set_ylabel('Count')
+    ax_hist.set_title('Stable-terrain M3C2 distances')
+    ax_hist.text(0.03, 0.97, f"Before\nmed:  {mb:+.2f}\nnmad: {nb:.2f}\nstd:  {sb:.2f}",
+                 transform=ax_hist.transAxes, va='top', ha='left',
+                 color='steelblue', fontsize=9)
+    ax_hist.text(0.97, 0.97, f"After\nmed:  {ma:+.2f}\nnmad: {na:.2f}\nstd:  {sa:.2f}",
+                 transform=ax_hist.transAxes, va='top', ha='right',
+                 color='tomato', fontsize=9)
+    if title:
+        fig.suptitle(title, y=1.04)
+
+    if output_dir is None:
+        plt.show()
+    else:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out / filename, dpi=300, bbox_inches='tight')
+        if save_pdf:
+            fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved: {out / filename}")
