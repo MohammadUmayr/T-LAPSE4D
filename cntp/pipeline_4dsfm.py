@@ -66,6 +66,7 @@ def run_4dsfm_day(
     add_to_registry: bool = True,
     run_validation: bool = True,
     max_unaligned: int = 10,
+    time_window: tuple[int, int] | None = None,
 ) -> dict:
     """Run the full 4D SfM pipeline for *new_date*.
 
@@ -124,6 +125,14 @@ def run_4dsfm_day(
         registry frozen nothing else consumes it, so validation is dead weight.
         The coreg M3C2 plot (Step 3b) is independent and always runs. When
         skipped, ``validation_med`` / ``validation_nmad`` / ``validation_std`` stay NaN.
+    time_window : tuple[int, int], optional
+        Inclusive capture-hour window ``(start_hour, end_hour)`` forwarded to
+        :func:`cntp.metashape.discover_images`. Keeps only frames captured in
+        that daytime window (e.g. ``(9, 17)``) and drops off-schedule night /
+        motion-triggered captures before they reach Step 1/Step 2. Because the
+        dropped night frames never align, they no longer inflate the Step-1
+        4D SfM ``max_unaligned`` gate, so ``max_unaligned`` can be tightened
+        without falsely skipping good days. ``None`` (default) keeps every frame.
 
     Returns
     -------
@@ -146,10 +155,14 @@ def run_4dsfm_day(
     reg_df   = pd.read_csv(registry_csv)
     utm_epsg = _utm_epsg(reg_df["lon"].mean())
 
-    by_date = discover_images(tlcam_dir)
+    by_date = discover_images(tlcam_dir, time_window=time_window)
     if new_date not in by_date:
         raise ValueError(f"No images found for date {new_date} under {tlcam_dir}")
     date_images = by_date[new_date]
+    if time_window is not None:
+        n_kept = sum(len(v) for v in date_images.values())
+        print(f"  [time_window {time_window[0]:02d}:00–{time_window[1]:02d}:59] "
+              f"{n_kept} daytime frame(s) kept for {new_date}")
 
     ecef_epsg = utm_epsg if use_ecef else None
 
@@ -179,8 +192,22 @@ def run_4dsfm_day(
     validation_med   = validation_nmad = validation_std  = float("nan")
 
     # ── Step 1: multi-temporal bundle adjustment ─────────────────────────
-    if overwrite or not cameras_4dsfm_csv.exists():
+    # The 4D SfM alignment gate lives here: when >= max_unaligned new-day
+    # cameras fail to align, run_multitemporal_ba writes this skip marker and
+    # raises, abandoning the whole date. Honour the marker on re-runs so the
+    # futile BA isn't repeated; overwrite=True forces a retry and clears it.
+    ba_skip_marker = sfm_dir / f"{new_date}_unaligned_skip.txt"
+    if cameras_4dsfm_csv.exists() and not overwrite:
+        print(f"[Step 1] Skipping — {cameras_4dsfm_csv.name} exists")
+    elif ba_skip_marker.exists() and not overwrite:
+        raise RuntimeError(
+            f"{new_date}: skipped earlier by the 4D SfM alignment gate "
+            f"({ba_skip_marker.name}); pass overwrite=True to retry."
+        )
+    else:
         print(f"\n[Step 1] Multi-temporal BA — {new_date}")
+        if ba_skip_marker.exists():
+            ba_skip_marker.unlink()   # retrying (overwrite) — clear stale marker
         cameras_4dsfm_csv, calib_dir_out = run_multitemporal_ba(
             date                   = new_date,
             date_images            = date_images,
@@ -191,30 +218,20 @@ def run_4dsfm_day(
             loc_acc_new            = loc_acc_new,
             rot_acc_new            = rot_acc_new,
             verbose                = verbose,
+            max_unaligned          = max_unaligned,
         )
-    else:
-        print(f"[Step 1] Skipping — {cameras_4dsfm_csv.name} exists")
 
     if stop_after_ba:
         print("\n[stop_after_ba=True] Halting after Step 1.")
         return None
 
     # ── Step 2: single-day fixed-IOP reconstruction ──────────────────────
-    # A previous run that hit the cloud-cover gate leaves a skip marker (no
-    # cloud is written). Honour it so re-runs don't redo the futile alignment;
-    # overwrite=True forces a retry and clears the marker.
-    tba_skip_marker = single_dir / f"{new_date}_unaligned_skip.txt"
+    # No alignment gate here — the only cloud-cover gate is in Step 1 (4D SfM).
+    # If Step 1 passed, this date is worth reconstructing.
     if tba_las_path.exists() and not overwrite:
         print(f"[Step 2] Skipping — {tba_las_path.name} exists")
-    elif tba_skip_marker.exists() and not overwrite:
-        raise RuntimeError(
-            f"{new_date}: skipped earlier by the cloud-cover gate "
-            f"({tba_skip_marker.name}); pass overwrite=True to retry."
-        )
     else:
         print(f"\n[Step 2] Single-day fixed IOP — {new_date}")
-        if tba_skip_marker.exists():
-            tba_skip_marker.unlink()   # retrying (overwrite) — clear stale marker
         tba_las_path, cameras_csv = run_single_day_fixed_iop(
             date            = new_date,
             date_images     = date_images,
@@ -228,7 +245,6 @@ def run_4dsfm_day(
             loc_acc         = loc_acc_new,
             rot_acc         = rot_acc_new,
             verbose         = verbose,
-            max_unaligned   = max_unaligned,
         )
 
     # ── Stable reference (shared cache across all days) ──────────────────
@@ -457,6 +473,7 @@ def run_4dsfm_day_with_rasters(
     add_to_registry: bool = True,
     run_validation: bool = True,
     max_unaligned: int = 10,
+    time_window: tuple[int, int] | None = None,
     # ── Raster knobs ──────────────────────────────────────────────────────
     res: float = 1.0,
     max_gap_pixels: int = 1,
@@ -503,8 +520,10 @@ def run_4dsfm_day_with_rasters(
         See :func:`run_4dsfm_day`.
     match_downscale, depth_downscale, filter_mode, loc_acc_new, rot_acc_new, ref_downsample,
     tba_downsample, p2p_max_disp, sp2p_max_disp, m_sp2p_max_disp, use_ecef,
-    overwrite, verbose, add_to_registry :
-        Forwarded to :func:`run_4dsfm_day`.
+    overwrite, verbose, add_to_registry, max_unaligned, time_window :
+        Forwarded to :func:`run_4dsfm_day`. ``time_window=(start_hour,
+        end_hour)`` keeps only daytime frames (drops night / motion-triggered
+        captures) so the Step-1 4D SfM ``max_unaligned`` gate can be tightened safely.
     res : float
         Output raster pixel size in metres. Default 1.0.
     max_gap_pixels : int
@@ -588,6 +607,7 @@ def run_4dsfm_day_with_rasters(
         add_to_registry = add_to_registry,
         run_validation  = run_validation,
         max_unaligned   = max_unaligned,
+        time_window     = time_window,
     )
 
     # ── Resolve shared paths + CRS ───────────────────────────────────────

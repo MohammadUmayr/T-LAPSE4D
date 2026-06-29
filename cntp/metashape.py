@@ -107,7 +107,7 @@ def _init_native_log(verbose: bool, log_path: "Path | None") -> "Path | None":
 # needs no code change, only its own renamer (or already-standard filenames)
 # producing this pattern. See cntp.preprocess.homogenize_images.
 _IMG_RE = re.compile(
-    r"^(?P<cam>[^_]+)_(?P<date>\d{4}-\d{2}-\d{2})_\d{6}\.(?:jpg|jpeg|JPG|JPEG)$"
+    r"^(?P<cam>[^_]+)_(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{6})\.(?:jpg|jpeg|JPG|JPEG)$"
 )
 
 # Same shape without the file extension, for matching Metashape camera /
@@ -162,10 +162,39 @@ def _utm_epsg(lon: float) -> int:
 # Image discovery
 # ---------------------------------------------------------------------------
 
-def discover_images(tlcam_dir: str | Path) -> dict[str, dict[str, list[Path]]]:
+def _validate_time_window(
+    time_window: tuple[int, int] | None,
+) -> tuple[int | None, int | None]:
+    """Validate a ``(start_hour, end_hour)`` capture-hour window.
+
+    Returns ``(lo, hi)`` as ints, or ``(None, None)`` when *time_window* is
+    ``None`` (no filtering). Raises ``ValueError`` on a malformed window.
+    """
+    if time_window is None:
+        return None, None
+    try:
+        lo, hi = time_window
+        lo, hi = int(lo), int(hi)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "time_window must be a (start_hour, end_hour) tuple of ints, "
+            f"got {time_window!r}"
+        )
+    if not (0 <= lo <= hi <= 23):
+        raise ValueError(
+            "time_window hours must satisfy 0 <= start_hour <= end_hour <= 23, "
+            f"got {time_window!r}"
+        )
+    return lo, hi
+
+
+def discover_images(
+    tlcam_dir: str | Path,
+    time_window: tuple[int, int] | None = None,
+) -> dict[str, dict[str, list[Path]]]:
     """Scan *tlcam_dir* recursively and return ``{date: {camera: [paths]}}``.
 
-    The camera id and date are read from each standardised filename
+    The camera id, date and time are read from each standardised filename
     (``<camera>_<YYYY-MM-DD>_<HHMMSS>.<ext>``), so the on-disk folder layout is
     irrelevant — ``C6_renamed/``, ``C6/``, or all images in one folder all
     work. Files that don't match the pattern (drone shots, ``notes.jpg``, …)
@@ -176,8 +205,18 @@ def discover_images(tlcam_dir: str | Path) -> dict[str, dict[str, list[Path]]]:
     tlcam_dir : str | Path
         Any directory (searched recursively) holding standardised time-lapse
         images. See :func:`cntp.preprocess.homogenize_images` to produce them.
+    time_window : tuple[int, int], optional
+        Inclusive capture-hour window ``(start_hour, end_hour)`` (0–23) used to
+        keep only daytime frames, e.g. ``(9, 17)`` keeps every frame captured
+        from 09:00:00 through 17:59:59 and drops off-schedule night /
+        motion-triggered captures. Dropping these *before* the pipeline runs
+        means they never inflate the Step-1 4D SfM ``max_unaligned`` alignment
+        gate (black night frames never align), so the gate can be tightened
+        without falsely skipping otherwise-good days. ``None`` (default) keeps
+        every frame — fully backward-compatible.
     """
     tlcam_dir = Path(tlcam_dir)
+    lo, hi = _validate_time_window(time_window)
     by_date: dict = defaultdict(lambda: defaultdict(list))
     # Match on the filename only — no per-entry is_file() stat. The strict
     # `<cam>_<date>_<time>.<ext>` pattern already excludes directories, and on
@@ -185,8 +224,11 @@ def discover_images(tlcam_dir: str | Path) -> dict[str, dict[str, list[Path]]]:
     # the name match (200 s vs 0.2 s for ~16k files).
     for img in sorted(tlcam_dir.rglob("*")):
         m = _IMG_RE.match(img.name)
-        if m:
-            by_date[m.group("date")][m.group("cam")].append(img)
+        if not m:
+            continue
+        if lo is not None and not (lo <= int(m.group("time")[:2]) <= hi):
+            continue   # outside the daytime window — skip night / motion frame
+        by_date[m.group("date")][m.group("cam")].append(img)
 
     return {d: dict(cams) for d, cams in sorted(by_date.items())}
 
@@ -887,6 +929,7 @@ def run_multitemporal_ba(
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
     verbose: bool = False,
+    max_unaligned: int = 10,
 ) -> tuple[Path, Path]:
     """Run multi-temporal bundle adjustment combining all reference + new day images.
 
@@ -913,6 +956,15 @@ def run_multitemporal_ba(
         Position accuracy (m) for new-day cameras.
     rot_acc_new : tuple
         Rotation accuracy (°) for new-day cameras.
+    max_unaligned : int
+        Cloud-cover gate (the pipeline's only alignment gate). When
+        ``>= max_unaligned`` of the day's new-day cameras fail to align in this
+        multi-temporal BA, a skip marker is written to
+        ``4D_SfM/<date>_unaligned_skip.txt`` and a ``RuntimeError`` is raised so
+        the whole date is abandoned before the costly single-day reconstruction
+        and co-registration. The count is over the new-day cameras actually
+        added, so a ``time_window`` that drops night frames also shrinks what
+        this gate sees. Default 10.
 
     Returns
     -------
@@ -1049,10 +1101,10 @@ def run_multitemporal_ba(
     if aligned == 0:
         raise RuntimeError(f"No cameras aligned in 4D SfM BA for {date}.")
 
-    # Step 1 never aborts on partial alignment (Step 2 may still recover the
-    # cameras and enforces the cloud-cover gate). But if any new-day camera
-    # failed to align, record which ones to a text file in the 4D_SfM folder —
-    # written only when there is something to report.
+    # 4D SfM alignment gate (the pipeline's only cloud-cover gate). Count the
+    # new-day cameras that failed to align; record which ones to a text file in
+    # the 4D_SfM folder, then — if too many failed — drop a skip marker and
+    # abort the date before the costly single-day reconstruction + coreg.
     unaligned = [c.label for c in chunk.cameras if date in c.label and not c.transform]
     if unaligned:
         report = sfm_dir / f"{date}_unaligned_step1.txt"
@@ -1063,6 +1115,18 @@ def run_multitemporal_ba(
         )
         print(f"  NOTE: {len(unaligned)}/{n_new} new-day cameras unaligned in "
               f"Step 1 → {report.name}", flush=True)
+
+    if len(unaligned) >= max_unaligned:
+        skip_marker = sfm_dir / f"{date}_unaligned_skip.txt"
+        skip_marker.write_text(
+            f"{date}: {len(unaligned)}/{n_new} new-day cameras unaligned in 4D SfM BA "
+            f"(>= max_unaligned={max_unaligned}) — alignment gate, date skipped.\n"
+            + "\n".join(unaligned) + "\n"
+        )
+        raise RuntimeError(
+            f"{date}: {len(unaligned)}/{n_new} new-day cameras unaligned in 4D SfM BA "
+            f"(>= max_unaligned={max_unaligned}) — likely cloud cover; skipping date."
+        )
 
     print("  Optimising cameras ...", flush=True)
     with _quiet_metashape(verbose, native_log):
@@ -1105,7 +1169,6 @@ def run_single_day_fixed_iop(
     loc_acc: tuple = (0.5, 0.5, 0.5),
     rot_acc: tuple = (5.0, 5.0, 5.0),
     verbose: bool = False,
-    max_unaligned: int = 10,
 ) -> tuple[Path, Path]:
     """Single-day re-run with IOP fixed and EOP loose.
 
@@ -1215,26 +1278,14 @@ def run_single_day_fixed_iop(
         chunk.alignCameras(adaptive_fitting=False)
     doc.save()
 
-    aligned   = sum(1 for c in chunk.cameras if c.transform)
-    unaligned = len(chunk.cameras) - aligned
+    aligned = sum(1 for c in chunk.cameras if c.transform)
     print(f"  Aligned {aligned}/{len(chunk.cameras)} cameras", flush=True)
     if aligned == 0:
         raise RuntimeError(f"No cameras aligned in single-day BA for {date}.")
 
-    # Cloud-cover gate: abort before the costly dense build when too many of the
-    # day's cameras failed to align (heavy cloud → many unaligned frames). Drop a
-    # skip marker so a re-run doesn't redo the (now-known-futile) alignment — the
-    # pipeline checks for it and fast-skips the date unless overwrite is set.
-    if unaligned >= max_unaligned:
-        skip_marker = day_dir / f"{date}_unaligned_skip.txt"
-        skip_marker.write_text(
-            f"{date}: {unaligned}/{len(chunk.cameras)} cameras unaligned "
-            f"(>= max_unaligned={max_unaligned}) — cloud-cover gate, Step 2 not run.\n"
-        )
-        raise RuntimeError(
-            f"{date}: {unaligned}/{len(chunk.cameras)} cameras unaligned "
-            f"(>= max_unaligned={max_unaligned}) — likely cloud cover; skipping date."
-        )
+    # No cloud-cover gate here — the pipeline's only alignment gate lives in
+    # Step 1 (run_multitemporal_ba). If Step 1 passed, this date is worth
+    # reconstructing, so Step 2 never aborts on partial alignment.
 
     # `matched` = this day's cameras Step 1 aligned & exported to the CSV. If
     # Step 2 aligned more, it recovered cameras Step 1 missed — surface that.
