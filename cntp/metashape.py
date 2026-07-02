@@ -1313,7 +1313,7 @@ def run_single_day_fixed_iop(
         chunk.buildDepthMaps(downscale=depth_downscale, filter_mode=_filter[filter_mode])
     print("  Building point cloud ...", flush=True)
     with _quiet_metashape(verbose, native_log):
-        chunk.buildPointCloud()
+        chunk.buildPointCloud(point_confidence=True)
     doc.save()
 
     # ── Exports ───────────────────────────────────────────────────────────
