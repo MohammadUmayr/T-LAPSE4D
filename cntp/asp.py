@@ -1,13 +1,23 @@
 """
 HSfM-style three-stage ICP co-registration for point clouds.
 
-Mirrors the ``pc_align_p2p_sp2p`` pipeline from Knuth et al. (2023) §4.3.3,
+Based on the ``pc_align_p2p_sp2p`` pipeline from Knuth et al. (2023) §4.3.3,
 wrapping NASA's Ames Stereo Pipeline (ASP) ``pc_align`` CLI tool.
+
+Deviation from Knuth et al.: Stages 2 & 3 use ``similarity-point-to-plane``
+instead of the paper's ``similarity-point-to-point``. Point-to-plane is more
+robust to the outlier correspondences that pollute stable terrain in monsoon
+UAV clouds. Validated on Changri West across 14 days (2024-06-23…06-30 plus 6
+random fully-aligned July–Oct days): point-to-plane beat point-to-point on
+stable-terrain M3C2 nmad on all 14, cutting the mean ~48–67%, removing a
+residual vertical bias, and landing nmad consistently at ~0.26–0.33 m
+regardless of starting condition. Stage 1 remains ``point-to-plane`` (rigid
+body) as in the paper.
 
 Stages (paper thresholds for km-scale NAGAP errors / UAV defaults):
   Stage 1 — point-to-plane ICP          2000 m / 2.0 m  rigid body
-  Stage 2 — similarity-point-to-point   1000 m / 1.0 m  + scale correction
-  Stage 3 — similarity-pt-to-pt,         100 m / 0.1 m  stable terrain only
+  Stage 2 — similarity-point-to-plane   1000 m / 1.0 m  + scale correction
+  Stage 3 — similarity-point-to-plane    100 m / 0.1 m  stable terrain only
              stable terrain only
 
 ASP installation
@@ -435,7 +445,7 @@ def pc_align_stage(
         File-path prefix for pc_align outputs (parent directory is created).
     alignment_method:
         ``'point-to-plane'`` for Stage 1 or
-        ``'similarity-point-to-point'`` for Stages 2 & 3.
+        ``'similarity-point-to-plane'`` for Stages 2 & 3.
     max_displacement:
         Maximum allowed correspondence distance [m].
     initial_transform:
@@ -585,10 +595,10 @@ def pc_align_p2p_sp2p(
     +=========+======================================+========================+
     | 1       | ``point-to-plane`` (rigid body)      | full reference         |
     +---------+--------------------------------------+------------------------+
-    | 2       | ``similarity-point-to-point``        | full reference         |
+    | 2       | ``similarity-point-to-plane``        | full reference         |
     |         | rotation + translation + scale       |                        |
     +---------+--------------------------------------+------------------------+
-    | 3       | ``similarity-point-to-point``        | stable terrain only    |
+    | 3       | ``similarity-point-to-plane``        | stable terrain only    |
     |         | rotation + translation + scale       | (glacier-masked +      |
     |         |                                      |  slope/NDWI-filtered)  |
     +---------+--------------------------------------+------------------------+
@@ -741,17 +751,18 @@ def pc_align_p2p_sp2p(
     )
 
     # ------------------------------------------------------------------
-    # Stage 2: similarity-point-to-point ICP
-    # Refines alignment and corrects systematic scale error.
+    # Stage 2: similarity-point-to-plane ICP
+    # Refines alignment and corrects systematic scale error. Point-to-plane
+    # (vs HSfM's point-to-point) is more outlier-robust — see module docstring.
     # t1 passed as --initial-transform; ASP outputs T2 ∘ T1.
     # HSfM uses max_displacement = 1000 m.
     # ------------------------------------------------------------------
-    print(f"  Stage 2 — similarity-point-to-point ICP "
+    print(f"  Stage 2 — similarity-point-to-plane ICP "
           f"(max_displacement={sp2p_max_displacement} m)")
     t2 = pc_align_stage(
         tba_icp_pc, ref_icp_pc,
         output_dir / "stage2" / "run",
-        alignment_method="similarity-point-to-point",
+        alignment_method="similarity-point-to-plane",
         max_displacement=sp2p_max_displacement,
         outlier_ratio=sp2p_outlier_ratio,
         initial_transform=t1,
@@ -759,18 +770,20 @@ def pc_align_p2p_sp2p(
     )
 
     # ------------------------------------------------------------------
-    # Stage 3: similarity-point-to-point on stable terrain only.
+    # Stage 3: similarity-point-to-plane on stable terrain only.
     # The stable reference excludes glacier and vegetation surfaces,
     # matching HSfM's mask_dem step (dem_mask.py --glaciers --nlcd).
+    # Point-to-plane (vs HSfM's point-to-point) is more outlier-robust — this
+    # is the stage that most improves stable-terrain nmad (see module docstring).
     # t2 passed as --initial-transform; ASP outputs T3 ∘ T2 ∘ T1.
     # HSfM uses max_displacement = 100 m.
     # ------------------------------------------------------------------
-    print(f"  Stage 3 — similarity-point-to-point ICP, stable terrain only "
+    print(f"  Stage 3 — similarity-point-to-plane ICP, stable terrain only "
           f"(max_displacement={m_sp2p_max_displacement} m)")
     t3 = pc_align_stage(
         tba_icp_pc, ref_stage3_pc,
         output_dir / "stage3" / "run",
-        alignment_method="similarity-point-to-point",
+        alignment_method="similarity-point-to-plane",
         max_displacement=m_sp2p_max_displacement,
         outlier_ratio=m_sp2p_outlier_ratio,
         initial_transform=t2,
