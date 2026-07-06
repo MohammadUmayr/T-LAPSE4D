@@ -570,3 +570,259 @@ def plot_m3c2_coreg_and_signal(
             fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
         plt.close(fig)
         print(f"  Saved: {out / filename}")
+
+
+# ---------------------------------------------------------------------------
+# Relative / absolute accuracy figures — drawing primitives
+# ---------------------------------------------------------------------------
+# Pure drawing helpers for the per-pixel relative-accuracy maps + boxplot and
+# the per-DEM absolute-accuracy boxes. Loaders/orchestrators live in
+# cntp.postprocessing, which calls these.
+
+_PLOT_STYLE = {
+    'font.family': 'serif', 'font.size': 12, 'axes.titlesize': 13,
+    'axes.labelsize': 12, 'xtick.labelsize': 10, 'ytick.labelsize': 10,
+    'axes.linewidth': 0.8, 'mathtext.fontset': 'cm',
+}
+
+
+def _save_or_show(fig, output_dir, filename, save_pdf):
+    """Save PNG (+ PDF when *save_pdf*) to *output_dir*, or show when it is None."""
+    if output_dir is None:
+        plt.show()
+        return
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out / filename, dpi=300, bbox_inches='tight')
+    if save_pdf:
+        fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Saved: {out / filename}")
+
+
+def _robust_vmax(matrix, pct=98.0):
+    """Colour limit from the ``pct``-th percentile of ``|matrix|`` (rounded up)."""
+    import math
+    a = np.abs(np.asarray(matrix, dtype="float64"))
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return 1.0
+    v = float(np.percentile(a, pct))
+    step = 0.5 if v < 5 else 1.0
+    return max(math.ceil(v / step) * step, step)
+
+
+def _summary(values):
+    """Mean/median/count of the finite entries of an array."""
+    a = np.asarray(values, dtype="float64")
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return {"mean": float("nan"), "median": float("nan"), "n": 0}
+    return {"mean": float(a.mean()), "median": float(np.median(a)), "n": int(a.size)}
+
+
+def _nice_scalebar_len(width_m, *, frac=0.25):
+    """A round scale-bar length ~ *frac* of the map width (1/2/2.5/5 x 10^n)."""
+    nice = [10, 20, 25, 50, 100, 150, 200, 250, 300, 500, 750,
+            1000, 2000, 2500, 5000, 10000]
+    target = max(width_m * frac, nice[0])
+    below = [n for n in nice if n <= target]
+    return below[-1] if below else nice[0]
+
+
+def _add_scalebar(ax, length_m, *, label=None, color="white", loc="lower right",
+                  thickness_m=None):
+    """Anchored scale bar *length_m* metres long (axes extent is in metres)."""
+    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+    import matplotlib.font_manager as fm
+    if label is None:
+        label = f"{length_m/1000:g} km" if length_m >= 1000 else f"{length_m:g} m"
+    if thickness_m is None:
+        thickness_m = length_m * 0.03
+    bar = AnchoredSizeBar(ax.transData, length_m, label, loc, pad=0.4,
+                          color=color, frameon=False, size_vertical=thickness_m,
+                          fontproperties=fm.FontProperties(size=10))
+    ax.add_artist(bar)
+
+
+def data_window(arr, extent, *, pad_frac=0.06, q=0.5):
+    """World-coordinate viewing window ``(xmin, xmax, ymin, ymax)`` for *arr*.
+
+    Framed by the ``q``..``100-q`` percentiles of the finite pixels'
+    easting/northing (not their min/max) and grown by ``pad_frac`` on each side,
+    so a small blob of pixels detached from the main body doesn't stretch the
+    frame. Pass the window to :func:`plot_maps_row` so several rasters share one
+    placement. ``q=0`` gives the full min/max box.
+    """
+    a = np.asarray(arr, dtype="float64")
+    rows, cols = np.where(np.isfinite(a))
+    if rows.size == 0:
+        return extent
+    H, W = a.shape
+    xmin, xmax, ymin, ymax = extent
+    pw, ph = (xmax - xmin) / W, (ymax - ymin) / H
+    xs = xmin + (cols + 0.5) * pw
+    ys = ymax - (rows + 0.5) * ph
+    x0, x1 = np.percentile(xs, [q, 100 - q])
+    y0, y1 = np.percentile(ys, [q, 100 - q])
+    s = max(x1 - x0, y1 - y0) * pad_frac
+    return (x0 - s, x1 + s, y0 - s, y1 + s)
+
+
+def plot_maps_row(panels, extent, *, window=None, scalebar_m="auto",
+                  bad_color="white", panel_size=6.0, output_dir=None,
+                  filename="pixel_maps.png", save_pdf=True):
+    """Draw several ``(H, W)`` rasters side by side on one shared window.
+
+    ``panels`` is a list of dicts, each with ``values`` and optional ``cmap``,
+    ``vmin``, ``vmax``, ``extend``, ``clabel``, ``title``. ``window`` (from
+    :func:`data_window`) sets a common view so the panels align; NaN cells and
+    the canvas use ``bad_color``. Each panel gets its own colourbar + scale bar.
+    """
+    import matplotlib.colors as mcolors
+
+    view = window if window is not None else extent
+    r, g, b = mcolors.to_rgb(bad_color)
+    sb_color = "black" if (0.299 * r + 0.587 * g + 0.114 * b) > 0.5 else "white"
+    plt.rcParams.update(_PLOT_STYLE)
+    fig, axes = plt.subplots(1, len(panels), squeeze=False,
+                             figsize=(panel_size * len(panels), panel_size))
+    for ax, p in zip(axes[0], panels):
+        cmap = plt.get_cmap(p.get("cmap", "viridis")).copy()
+        cmap.set_bad(bad_color)
+        ax.set_facecolor(bad_color)
+        im = ax.imshow(np.ma.masked_invalid(np.asarray(p["values"], float)),
+                       extent=extent, origin="upper", cmap=cmap,
+                       vmin=p.get("vmin"), vmax=p.get("vmax"))
+        ax.set_xlim(view[0], view[1])
+        ax.set_ylim(view[2], view[3])
+        ax.set_aspect("equal")
+        ax.set_xlabel("Easting (m)")
+        if p.get("title"):
+            ax.set_title(p["title"])
+        fig.colorbar(im, ax=ax, extend=p.get("extend", "neither"),
+                     fraction=0.046, pad=0.04).set_label(p.get("clabel", ""))
+        if scalebar_m:
+            length = (_nice_scalebar_len(view[1] - view[0])
+                      if scalebar_m == "auto" else scalebar_m)
+            _add_scalebar(ax, length, color=sb_color)
+    axes[0][0].set_ylabel("Northing (m)")
+    plt.tight_layout()
+    _save_or_show(fig, output_dir, filename, save_pdf)
+
+
+def plot_relative_accuracy_boxplot(sd, nmad, *,
+                                   title="Relative accuracy of stable-terrain "
+                                   "M3C2 stack", ylabel="Per-pixel deviation (m)",
+                                   ylim=None, output_dir=None,
+                                   filename="stable_relative_accuracy.png",
+                                   save_pdf=True):
+    """Relative-accuracy boxplot of per-corepoint stable SD and NMAD.
+
+    Two boxes (SD, NMAD): box = IQR, red median line, whiskers 1.5xIQR, fliers
+    hidden, black-triangle mean (legend "mean"/"median"). Returns the mean/median
+    of each so the printed number and the figure agree. Pass the finite-or-NaN
+    arrays from :func:`cntp.postprocessing.stable_precision_arrays`; NaNs are
+    dropped here.
+    """
+    from matplotlib.lines import Line2D
+
+    sd = np.asarray(sd, dtype="float64"); sd = sd[np.isfinite(sd)]
+    nmad = np.asarray(nmad, dtype="float64"); nmad = nmad[np.isfinite(nmad)]
+
+    plt.rcParams.update(_PLOT_STYLE)
+    fig, ax = plt.subplots(figsize=(3.2, 4.2))
+    ax.boxplot(
+        [sd, nmad], positions=[1, 2], widths=0.5,
+        whis=1.5, showfliers=False, showmeans=True,
+        medianprops=dict(color="red", lw=1.2),
+        meanprops=dict(marker="^", markerfacecolor="black",
+                       markeredgecolor="black", markersize=7),
+        boxprops=dict(color="black"), whiskerprops=dict(color="black"),
+        capprops=dict(color="black"),
+    )
+    ax.set_xticks([1, 2])
+    ax.set_xticklabels(["SD", "NMAD"])
+    ax.set_ylabel(ylabel)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    else:
+        ax.set_ylim(0, None)
+    ax.legend(handles=[Line2D([0], [0], marker="^", color="none",
+                              markerfacecolor="black", markeredgecolor="black",
+                              markersize=7, label="mean"),
+                       Line2D([0], [0], color="red", lw=1.2, label="median")],
+              loc="upper right", frameon=False, handletextpad=0.2)
+    if title:
+        ax.set_title(title)
+    plt.tight_layout()
+    summary = {"sd": _summary(sd), "nmad": _summary(nmad)}
+    _save_or_show(fig, output_dir, filename, save_pdf)
+    return summary
+
+
+def plot_absolute_accuracy_boxes(records, *, area_is_km2=True, bin_days=14,
+                                 site_label=None, cmap="Blues", median_color="red",
+                                 ylim=None, width=None, output_dir=None,
+                                 filename="stable_absolute_accuracy.png",
+                                 save_pdf=True):
+    """Absolute-accuracy boxes: per-DEM stable residual distributions over time.
+
+    ``records`` is a list of ``{date, area, vals}`` (``vals`` = that DEM's finite
+    stable residuals). One box per record at its real date, coloured by ``area``
+    (``Blues`` + colourbar; km^2 when ``area_is_km2`` else corepoint count). Red
+    median, whiskers 1.5xIQR, fliers hidden, dashed zero line; y auto-fits the
+    whiskers symmetric about 0 unless ``ylim`` is given. ``bin_days`` only sets
+    the cadence word in the title.
+    """
+    import matplotlib.dates as mdates
+    import matplotlib.colors as mcolors
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.lines import Line2D
+
+    areas = np.array([r["area"] for r in records], dtype="float64")
+    norm = mcolors.Normalize(vmin=float(areas.min()), vmax=float(areas.max()))
+    cmap_obj = plt.get_cmap(cmap)
+    if width is None:
+        width = bin_days * 0.6 if bin_days else 5.0
+
+    plt.rcParams.update(_PLOT_STYLE)
+    fig, ax = plt.subplots(figsize=(11, 4.2))
+    ax.axhline(0, color="0.4", lw=0.9, ls="--", zorder=1)
+    whi = 0.0
+    for r in records:
+        pos = mdates.date2num(r["date"])
+        bp = ax.boxplot([r["vals"]], positions=[pos], widths=width,
+                        whis=1.5, showfliers=False, patch_artist=True,
+                        medianprops=dict(color=median_color, lw=1.2),
+                        boxprops=dict(color="black"),
+                        whiskerprops=dict(color="black"),
+                        capprops=dict(color="black"), manage_ticks=False)
+        bp["boxes"][0].set_facecolor(cmap_obj(norm(r["area"])))
+        whi = max(whi, abs(bp["caps"][0].get_ydata()[0]),
+                  abs(bp["caps"][1].get_ydata()[0]))
+
+    ax.set_ylabel("Elevation difference (m)")
+    ax.set_xlabel("Date")
+    ax.set_ylim(*(ylim if ylim is not None else (-1.1 * whi, 1.1 * whi)))
+    ax.xaxis_date()
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    fig.autofmt_xdate()
+    suffix = f" — {site_label}" if site_label else ""
+    cadence = {7: "weekly", 14: "biweekly", 30: "monthly", 31: "monthly"}
+    if bin_days:
+        ax.set_title(f"Absolute accuracy "
+                     f"({cadence.get(bin_days, f'{bin_days}-day')}){suffix}")
+    else:
+        ax.set_title(f"Absolute accuracy{suffix}")
+    ax.legend(handles=[Line2D([0], [0], color=median_color, lw=1.2,
+                              label="median")],
+              loc="upper right", frameon=False, handletextpad=0.4)
+    sm = ScalarMappable(norm=norm, cmap=cmap_obj)
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax)
+    cb.set_label("Stable surface area (km$^2$)" if area_is_km2
+                 else "Valid stable corepoints")
+    plt.tight_layout()
+    _save_or_show(fig, output_dir, filename, save_pdf)
