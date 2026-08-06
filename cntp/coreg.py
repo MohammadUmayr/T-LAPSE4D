@@ -5,7 +5,7 @@ import py4dgeo
 _NDWI_A = -150 / 0.25   # slope
 _NDWI_B = 150            # intercept
 
-def downsample_point_cloud(points, downsample_factor):
+def downsample_point_cloud(points: np.ndarray, downsample_factor: float) -> np.ndarray:
     """
     Downsample a point cloud by randomly selecting a subset of points.
 
@@ -22,7 +22,7 @@ def downsample_point_cloud(points, downsample_factor):
     downsampled_points = points[indices]
     return downsampled_points
 
-def filter_points_inside_box(points, min_bound, max_bound):
+def filter_points_inside_box(points: np.ndarray, min_bound: np.ndarray, max_bound: np.ndarray) -> np.ndarray:
     """
     Filter points that fall inside a specified bounding box.
 
@@ -38,7 +38,7 @@ def filter_points_inside_box(points, min_bound, max_bound):
     filtered_points = points[mask]
     return filtered_points
 
-def filter_points_outside_box(points, min_bound, max_bound):
+def filter_points_outside_box(points: np.ndarray, min_bound: np.ndarray, max_bound: np.ndarray) -> np.ndarray:
     """
     Filter points that fall outside a specified bounding box.
 
@@ -54,7 +54,13 @@ def filter_points_outside_box(points, min_bound, max_bound):
     filtered_points = points[mask]
     return filtered_points
 
-def filter_points(points, colors, normals, criterium, threshold):
+def filter_points(
+    points: np.ndarray,
+    colors: np.ndarray,
+    normals: np.ndarray,
+    criterium: np.ndarray,
+    threshold: float,
+) -> np.ndarray:
     """
     Filter points based on given criterium.
 
@@ -72,7 +78,7 @@ def filter_points(points, colors, normals, criterium, threshold):
     filtered_data = np.hstack((points[mask], colors[mask], normals[mask]))
     return filtered_data
 
-def otsu_thresholding(vector, bins_num):
+def otsu_thresholding(vector: np.ndarray, bins_num: int) -> float:
     """
     Determine Otsu threshold of distribution
 
@@ -107,7 +113,7 @@ def otsu_thresholding(vector, bins_num):
     threshold = bin_mids[:-1][index_of_max_val]
     return threshold
 
-def calculate_aspect_slope(normal):
+def calculate_aspect_slope(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculate aspect and slope from the normal vector.
 

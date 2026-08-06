@@ -37,7 +37,12 @@ from cntp.coreg import _NDWI_A, _NDWI_B, run_m3c2
 # GeoTIFF I/O
 # ---------------------------------------------------------------------------
 
-def save_dem(array, filename, crs_epsg, transform):
+def save_dem(
+    array: np.ndarray,
+    filename: str | Path,
+    crs_epsg: "rasterio.crs.CRS | str | int",
+    transform: "rasterio.Affine",
+) -> None:
     with rasterio.open(
         filename,
         "w",
@@ -54,7 +59,18 @@ def save_dem(array, filename, crs_epsg, transform):
     print("Saved:", filename)
 
 
-def save_ortho(x, y, rgb, xi, yi, res, max_gap_pixels, filename, crs_epsg, transform):
+def save_ortho(
+    x: np.ndarray,
+    y: np.ndarray,
+    rgb: np.ndarray,
+    xi: np.ndarray,
+    yi: np.ndarray,
+    res: float,
+    max_gap_pixels: float,
+    filename: str | Path,
+    crs_epsg: "rasterio.crs.CRS | str | int",
+    transform: "rasterio.Affine",
+) -> None:
         # Precompute DEM pixel centers
         pixels_xy = np.column_stack([xi.ravel(), yi.ravel()])
 
@@ -107,7 +123,15 @@ def save_ortho(x, y, rgb, xi, yi, res, max_gap_pixels, filename, crs_epsg, trans
 # Cubic griddata + KDTree gap mask
 # ---------------------------------------------------------------------------
 
-def interpolate_and_mask(x, y, z, xi, yi, res, max_gap_pixels):
+def interpolate_and_mask(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    xi: np.ndarray,
+    yi: np.ndarray,
+    res: float,
+    max_gap_pixels: float,
+) -> np.ndarray:
     # Interpolation (cubic)
     zi = griddata((x, y), z, (xi, yi), method='cubic')
 

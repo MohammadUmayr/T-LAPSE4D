@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -28,7 +29,7 @@ from cntp.plot import (
 )
 
 
-def _read_raster(path) -> tuple[np.ndarray, tuple[float, float, float, float]]:
+def _read_raster(path: str | Path) -> tuple[np.ndarray, tuple[float, float, float, float]]:
     """Read a single-band raster → (array with NaN nodata, (xmin, xmax, ymin, ymax))."""
     with rasterio.open(path) as src:
         arr = src.read(1).astype("float64")
@@ -145,10 +146,10 @@ class SignalStack:
     crs: object
     paths: list
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.dates)
 
-    def raster(self, i):
+    def raster(self, i: int) -> Any:
         """Re-wrap slice *i* as a geoutils Raster (for interp_points sampling)."""
         import geoutils as gu
         return gu.Raster.from_array(
@@ -157,7 +158,7 @@ class SignalStack:
         )
 
     @property
-    def extent(self):
+    def extent(self) -> tuple[float, float, float, float]:
         """(xmin, xmax, ymin, ymax) for matplotlib imshow of a slice."""
         H, W = self.cube.shape[1:]
         a = self.transform
@@ -165,8 +166,16 @@ class SignalStack:
         return (xmin, xmin + a.a * W, ymax + a.e * H, ymax)
 
 
-def load_signal_stack(output_dir, *, kind="M3C2_raster", date_from=None,
-                      date_to=None, dtype="float32", cache=True, cache_dir=None):
+def load_signal_stack(
+    output_dir: str | Path,
+    *,
+    kind: str = "M3C2_raster",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    dtype: str = "float32",
+    cache: bool = True,
+    cache_dir: str | Path | None = None,
+) -> SignalStack:
     """Stack every ``output/<date>/single_day/<date>_<kind>.tif`` into a cube.
 
     Discovers the per-date rasters, checks all share one grid, and loads them
@@ -263,12 +272,12 @@ def load_signal_stack(output_dir, *, kind="M3C2_raster", date_from=None,
 # in corepoint space (1:1 aligned to the fixed reference corepoints), avoiding
 # the per-date cropping of the stable-M3C2 rasters.
 
-def per_pixel_obs_count(stack):
+def per_pixel_obs_count(stack: SignalStack) -> np.ndarray:
     """Per-pixel number of finite observations across the stack -> (H, W) int32."""
     return np.isfinite(stack.cube).sum(axis=0).astype(np.int32)
 
 
-def _nanmad(mat):
+def _nanmad(mat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Temporal (axis-0) NMAD and median of *mat*, NaN-aware -> (nmad, median).
 
     Works for a ``(T, H, W)`` cube or a ``(T, N)`` corepoint matrix.
@@ -279,7 +288,7 @@ def _nanmad(mat):
     return nmad, med
 
 
-def per_pixel_nmad_map(stack, *, min_obs=3):
+def per_pixel_nmad_map(stack: SignalStack, *, min_obs: int = 3) -> dict[str, np.ndarray]:
     """Whole-footprint per-pixel NMAD + observation count from the M3C2 stack.
 
     Returns ``{count, nmad, median, valid}`` (each (H, W)); ``nmad``/``median``
@@ -293,14 +302,20 @@ def per_pixel_nmad_map(stack, *, min_obs=3):
             "median": np.where(valid, med, np.nan), "valid": valid}
 
 
-def _discover_stable_ref(output_dir):
+def _discover_stable_ref(output_dir: str | Path) -> Path | None:
     """Return the cached stable-terrain reference LAS path, or None."""
     cands = sorted((Path(output_dir) / "output" / "_ref_cache").glob("*_stable.las"))
     return cands[0] if cands else None
 
 
-def load_stable_distance_stack(output_dir, *, which="after", dates=None,
-                               date_from=None, date_to=None):
+def load_stable_distance_stack(
+    output_dir: str | Path,
+    *,
+    which: str = "after",
+    dates: list[str] | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[list[str], np.ndarray, np.ndarray]:
     """Stack per-date stable-terrain M3C2 distances from the coreg ``.npz`` files.
 
     Discovers ``output/<date>/coreg/<date>_m3c2_distances.npz`` and stacks the
@@ -353,8 +368,15 @@ def load_stable_distance_stack(output_dir, *, which="after", dates=None,
     return ds, times, matrix
 
 
-def load_stable_grid_stack(output_dir, *, which="after", res=1.0,
-                           stable_ref_las=None, date_from=None, date_to=None):
+def load_stable_grid_stack(
+    output_dir: str | Path,
+    *,
+    which: str = "after",
+    res: float = 1.0,
+    stable_ref_las: str | Path | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Per-date stable-terrain M3C2 distances binned onto a ``res``-metre grid.
 
     Loads the point-space distances (:func:`load_stable_distance_stack`), places
@@ -415,7 +437,12 @@ def load_stable_grid_stack(output_dir, *, which="after", res=1.0,
     return times, grid
 
 
-def _nmad_keep_mask(times, date_nmad, max_nmad, max_nmad_from):
+def _nmad_keep_mask(
+    times: np.ndarray,
+    date_nmad: np.ndarray,
+    max_nmad: float | None,
+    max_nmad_from: str | None,
+) -> np.ndarray:
     """Keep-mask over acquisitions: drop those with ``NMAD >= max_nmad``.
 
     When ``max_nmad_from`` (``YYYY-MM-DD``) is given the threshold applies only
@@ -435,16 +462,25 @@ def _nmad_keep_mask(times, date_nmad, max_nmad, max_nmad_from):
     return keep & ~bad
 
 
-def per_acquisition_nmad(grid):
+def per_acquisition_nmad(grid: np.ndarray) -> np.ndarray:
     """Per-acquisition post-coreg stable NMAD from a gridded stable stack."""
     with np.errstate(all="ignore"):
         med = np.nanmedian(grid, axis=1)
         return 1.4826 * np.nanmedian(np.abs(grid - med[:, None]), axis=1)
 
 
-def stable_precision_arrays(output_dir, *, which="after", min_obs=3, res=1.0,
-                            max_nmad=None, max_nmad_from=None,
-                            stable_ref_las=None, date_from=None, date_to=None):
+def stable_precision_arrays(
+    output_dir: str | Path,
+    *,
+    which: str = "after",
+    min_obs: int = 3,
+    res: float = 1.0,
+    max_nmad: float | None = None,
+    max_nmad_from: str | None = None,
+    stable_ref_las: str | Path | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Per-pixel stable-terrain SD and NMAD on a ``res``-metre grid.
 
     Reduces the gridded stable stack (:func:`load_stable_grid_stack`) along time:
@@ -475,7 +511,7 @@ def stable_precision_arrays(output_dir, *, which="after", min_obs=3, res=1.0,
     return np.where(valid, sd, np.nan), np.where(valid, nmad, np.nan)
 
 
-def load_coreg_nmad(output_dir, dates):
+def load_coreg_nmad(output_dir: str | Path, dates: list[str]) -> np.ndarray:
     """Post-coreg stable-terrain NMAD per acquisition, from the pipeline's stats.
 
     Reads the ``after`` row of ``output/<date>/coreg/<date>_m3c2_stats.csv`` — the
@@ -500,7 +536,13 @@ def load_coreg_nmad(output_dir, dates):
     return out
 
 
-def _reference_ortho_panel(output_dir, stack, footprint, *, title=None):
+def _reference_ortho_panel(
+    output_dir: str | Path,
+    stack: SignalStack,
+    footprint: np.ndarray,
+    *,
+    title: str | None = None,
+) -> dict[str, Any] | None:
     """RGBA ortho panel regridded to the stack grid and clipped to *footprint*.
 
     Reads ``output/_ref_cache/reference_ortho.tif``, resamples it onto the M3C2
@@ -529,14 +571,30 @@ def _reference_ortho_panel(output_dir, stack, footprint, *, title=None):
     return {"values": np.dstack([rgb, alpha]), "rgb": True, "title": title}
 
 
-def pixel_relative_accuracy(output_dir, *, kind="M3C2_raster", date_from=None,
-                            date_to=None, min_obs=3, which="after", res=1.0,
-                            max_nmad=None, max_nmad_from=None,
-                            plot_dir=None, site_label=None, ortho=True,
-                            panel_size=6.0, count_cmap="magma",
-                            nmad_cmap="viridis", nmad_vmax=None, nmad_vmax_pct=98.0,
-                            scalebar_m="auto", box_ylim=None, show=False,
-                            save_pdf=True):
+def pixel_relative_accuracy(
+    output_dir: str | Path,
+    *,
+    kind: str = "M3C2_raster",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_obs: int = 3,
+    which: str = "after",
+    res: float = 1.0,
+    max_nmad: float | None = None,
+    max_nmad_from: str | None = None,
+    plot_dir: str | Path | None = None,
+    site_label: str | None = None,
+    ortho: bool = True,
+    panel_size: float = 6.0,
+    count_cmap: str = "magma",
+    nmad_cmap: str = "viridis",
+    nmad_vmax: float | None = None,
+    nmad_vmax_pct: float = 98.0,
+    scalebar_m: float | str = "auto",
+    box_ylim: tuple[float, float] | None = None,
+    show: bool = False,
+    save_pdf: bool = True,
+) -> dict[str, Any]:
     """Relative accuracy from the M3C2 signal (ortho + coverage + NMAD + boxplot).
 
     Writes ``pixel_maps.png`` — the reference ortho (clipped to the coverage
@@ -617,13 +675,26 @@ def pixel_relative_accuracy(output_dir, *, kind="M3C2_raster", date_from=None,
             "nmad_vmax": vmax, "valid": maps["valid"], "stable_stats": stable}
 
 
-def absolute_accuracy_boxplots(output_dir, *, which="after", bin_days=14,
-                               max_nmad=0.5, max_nmad_from=None,
-                               date_from=None, date_to=None,
-                               stable_ref_las=None, res=1.0, ylim=None,
-                               cmap="Blues", median_color="red", site_label=None,
-                               plot_dir=None, filename="stable_absolute_accuracy.png",
-                               show=False, save_pdf=True):
+def absolute_accuracy_boxplots(
+    output_dir: str | Path,
+    *,
+    which: str = "after",
+    bin_days: int | None = 14,
+    max_nmad: float | None = 0.5,
+    max_nmad_from: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    stable_ref_las: str | Path | None = None,
+    res: float = 1.0,
+    ylim: tuple[float, float] | None = None,
+    cmap: str = "Blues",
+    median_color: str = "red",
+    site_label: str | None = None,
+    plot_dir: str | Path | None = None,
+    filename: str = "stable_absolute_accuracy.png",
+    show: bool = False,
+    save_pdf: bool = True,
+) -> list[dict[str, Any]]:
     """Absolute accuracy of each acquisition over time, on stable terrain.
 
     Each box is one acquisition's distribution of stable-terrain M3C2 ``which``
@@ -684,7 +755,7 @@ def absolute_accuracy_boxplots(output_dir, *, which="after", bin_days=14,
     if usable.size == 0:
         raise ValueError("no acquisitions with valid stable distances")
 
-    def _record(r_sel, slot_date, offset_days):
+    def _record(r_sel: int, slot_date: Any, offset_days: int) -> dict[str, Any] | None:
         vals = grid[r_sel]
         vals = vals[np.isfinite(vals)]
         if vals.size == 0:
