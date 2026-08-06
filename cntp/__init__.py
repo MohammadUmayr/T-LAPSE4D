@@ -8,7 +8,6 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # if you need to cap thread count.
 os.environ.setdefault("OMP_NUM_THREADS", str(os.cpu_count() or 1))
 
-import cntp.batch
 import cntp.coreg
 import cntp.io
 import cntp.metashape

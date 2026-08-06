@@ -824,8 +824,6 @@ def evaluate_coreg(
 ) -> dict:
     """Compute M3C2 distances on stable terrain before and after co-registration.
 
-    Follows the same ``ref_downsample_factor`` / ``tba_downsample_factor`` convention
-    as :func:`cntp.batch.coreg_pc`:
     ``ref_downsample_factor`` applies to the reference cloud;
     ``tba_downsample_factor`` applies to both TBA clouds and defaults to
     ``ref_downsample_factor`` when not set.

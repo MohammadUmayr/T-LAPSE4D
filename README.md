@@ -449,7 +449,6 @@ tunable flags below (defaults shown — most runs only set the required argument
 | `cntp.io` | LAS/LAZ point-cloud I/O + glacier masking. |
 | `cntp.raster` | DEM / orthoimage / DoD / M3C2 → GeoTIFF rasterisation. |
 | `cntp.plot` | Diagnostic plots + histograms. |
-| `cntp.batch` | Batch co-registration helpers. |
 | `cntp.pipeline_4dsfm` | Per-date orchestration — `run_4dsfm_day`, `run_4dsfm_day_with_rasters`. |
 
 ## Notebooks
