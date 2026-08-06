@@ -477,12 +477,12 @@ workflow.
 ## Tests
 
 ```bash
-pytest                          # 321 tests, ~25 s
+pytest                                    # 321 tests, ~25 s
 coverage run -m pytest && coverage report
 ```
 
-The suite is fully self-contained: every fixture is synthetic and lives in a temporary
-directory, so it needs **no Metashape licence, no ASP binaries and no real data**. Settings live in
+The suite is fully self-contained: every fixture is synthetic and lives in a temporary directory, so
+it needs **no Metashape licence, no ASP binaries and no real data**. Settings live in
 `pyproject.toml`, so neither command needs arguments.
 
 Coverage is **96% of reachable code** (1504/1567 statements). The raw figure is 62%; the difference
@@ -493,17 +493,19 @@ is code that cannot run without the proprietary or external parts of the stack:
 | `cntp.io`, `cntp.coreg` | 100% | — |
 | `cntp.metashape` | 98% | SfM entry points need a licensed Metashape project |
 | `cntp.preprocess` | 97% | — |
-| `cntp.asp`, `cntp.postprocessing` | 96% | `pc_align` / `point2dem` need ASP binaries |
-| `cntp.plot`, `cntp.raster` | 95% | `build_dem_and_ortho_p2d` shells out to ASP |
+| `cntp.asp` | 96% | `pc_align` needs ASP binaries |
+| `cntp.postprocessing` | 96% | — |
+| `cntp.plot` | 95% | — |
+| `cntp.raster` | 95% | `build_dem_and_ortho_p2d` shells out to ASP `point2dem` |
 | `cntp.pipeline_4dsfm` | 0% | end-to-end orchestration; needs both |
 
-One test module per source module. Reaching the remaining modules would take integration tests
+There is one test module per source module. Reaching the remaining code would take integration tests
 against a licensed install and real imagery, not unit tests.
 
 ### Pre-commit hooks
 
 ```bash
-pre-commit install              # once; hooks then run on every commit
+pre-commit install                        # once; hooks then run on every commit
 ```
 
 Configured in `.pre-commit-config.yaml`: `flake8` (with `bugbear` and `comprehensions`), `isort`,
