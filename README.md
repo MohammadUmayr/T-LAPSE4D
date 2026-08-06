@@ -1,5 +1,11 @@
 # CNTP
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-321%20passing-brightgreen.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](#tests)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](.pre-commit-config.yaml)
+
 A library for generating and processing point clouds from the timelapse photogrammetry.
 
 It turns fixed time-lapse photographs of a glacier into **co-registered 3-D point
@@ -30,6 +36,7 @@ monitoring workflow can be driven from a Jupyter notebook by passing paths as va
 - [Pipeline parameters](#pipeline-parameters)
 - [Module map](#module-map)
 - [Notebooks](#notebooks)
+- [Tests](#tests)
 - [License](#license)
 - [Hackathon](#hackathon)
 
@@ -464,6 +471,44 @@ The driver notebooks for the current library live in `examples/`:
 Other notebooks in `contributors/umayr/` are exploratory/test notebooks written
 while developing and validating individual functions — not part of the current
 workflow.
+
+---
+
+## Tests
+
+```bash
+pytest                          # 321 tests, ~25 s
+coverage run -m pytest && coverage report
+```
+
+The suite is fully self-contained: every fixture is synthetic and lives in a temporary
+directory, so it needs **no Metashape licence, no ASP binaries and no real data**. Settings live in
+`pyproject.toml`, so neither command needs arguments.
+
+Coverage is **96% of reachable code** (1504/1567 statements). The raw figure is 62%; the difference
+is code that cannot run without the proprietary or external parts of the stack:
+
+| Module | Reachable coverage | Not reachable in tests |
+|---|---|---|
+| `cntp.io`, `cntp.coreg` | 100% | — |
+| `cntp.metashape` | 98% | SfM entry points need a licensed Metashape project |
+| `cntp.preprocess` | 97% | — |
+| `cntp.asp`, `cntp.postprocessing` | 96% | `pc_align` / `point2dem` need ASP binaries |
+| `cntp.plot`, `cntp.raster` | 95% | `build_dem_and_ortho_p2d` shells out to ASP |
+| `cntp.pipeline_4dsfm` | 0% | end-to-end orchestration; needs both |
+
+One test module per source module. Reaching the remaining modules would take integration tests
+against a licensed install and real imagery, not unit tests.
+
+### Pre-commit hooks
+
+```bash
+pre-commit install              # once; hooks then run on every commit
+```
+
+Configured in `.pre-commit-config.yaml`: `flake8` (with `bugbear` and `comprehensions`), `isort`,
+`codespell`, `mypy` over `tests/`, and hygiene hooks — including `check-added-large-files`, which
+keeps point clouds and DEMs out of the history. No autoformatter is configured deliberately.
 
 ---
 
