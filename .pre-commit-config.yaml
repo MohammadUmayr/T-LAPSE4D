@@ -32,11 +32,33 @@ repos:
                   types_or: [python, markdown]
                   files: ^(cntp|tests)/
 
-        # Lint the code using flake8. Rule selection lives in .flake8.
+        # Lint the code using flake8.
+        #
+        # No autoformatter is configured for this project: the codebase aligns related assignments
+        # by hand (~260 lines), which black would collapse. Enforcing pycodestyle's layout rules
+        # would fight that same style from the other direction, so only the rule families that find
+        # real problems are selected:
+        #   F   pyflakes        - undefined names, unused imports, unused variables
+        #   B   bugbear         - likely bugs, e.g. mutable default arguments
+        #   C   comprehensions  - comprehensions written as slower or less clear calls
+        #   E9  syntax and indentation errors that break parsing
+        #
+        # C408 objects to `dict(a=1)` in favour of `{"a": 1}` - a preference, not a defect, and the
+        # keyword form reads better for the wide option dicts the plotting code passes around.
+        #
+        # cntp/__init__.py imports submodules so `import cntp` exposes the whole namespace; they are
+        # not referenced in the file itself, so F401 is waived there.
         - repo: https://github.com/pycqa/flake8
           rev: 7.3.0
           hooks:
                 - id: flake8
+                  args: [
+                    '--max-line-length', '120',
+                    '--select', 'F,B,C,E9',
+                    '--extend-ignore', 'C408',
+                    '--per-file-ignores', 'cntp/__init__.py:F401',
+                    '--'
+                  ]
                   additional_dependencies:
                           - flake8-comprehensions
                           - flake8-bugbear
