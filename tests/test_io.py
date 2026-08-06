@@ -14,10 +14,10 @@ import geopandas as gpd
 import laspy
 import numpy as np
 import pytest
+from conftest import UTM45N, make_cloud
 from shapely.geometry import Polygon
 
 from cntp.io import apply_glacier_mask, load_las, read_las_bounds, save_las
-from conftest import UTM45N, make_cloud
 
 
 @pytest.fixture

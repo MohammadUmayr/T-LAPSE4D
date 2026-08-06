@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import py4dgeo
 import pytest
+from conftest import make_cloud
 
 from cntp.coreg import (
     _NDWI_A,
@@ -27,7 +28,6 @@ from cntp.coreg import (
     otsu_thresholding,
     run_m3c2,
 )
-from conftest import make_cloud
 
 
 def _plane(n: int = 1500, z: float = 0.0, seed: int = 42) -> np.ndarray:

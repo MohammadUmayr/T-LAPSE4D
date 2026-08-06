@@ -121,7 +121,7 @@ class TestTimeWindow:
             (17, 9),  # reversed
             (-1, 12),  # below range
             (9, 24),  # above range
-            ("nine", 17),  # unparseable
+            ("nine", 17),  # not a number
             (9,),  # wrong arity
         ],
     )

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import GRID_SHAPE, GRID_TRANSFORM, write_raster
 from rasterio.crs import CRS
 
 from cntp.postprocessing import (
@@ -37,7 +38,6 @@ from cntp.postprocessing import (
     pixel_relative_accuracy,
     stable_precision_arrays,
 )
-from conftest import GRID_SHAPE, GRID_TRANSFORM, write_raster
 
 # A series of 1, 2, 3 has median 2 and median-absolute-deviation 1, so its NMAD is 1.4826 * 1.
 NMAD_OF_1_2_3 = 1.4826
@@ -354,7 +354,14 @@ class TestSignalStackContainer:
     """The dataclass wrapper carrying the cube alongside its dates and georeferencing."""
 
     def test_signal_stack__len(self) -> None:
-        stack = SignalStack(["2024-06-23", "2024-06-24"], None, np.zeros((2, *GRID_SHAPE)), GRID_TRANSFORM, None, [])
+        stack = SignalStack(
+            ["2024-06-23", "2024-06-24"],
+            _times("2024-06-23", "2024-06-24"),
+            np.zeros((2, *GRID_SHAPE)),
+            GRID_TRANSFORM,
+            None,
+            [],
+        )
 
         assert len(stack) == 2
 
@@ -515,8 +522,9 @@ class TestLoadStableGridStack:
         self, pipeline_output_dir: tuple[Path, list[str]], tmp_path: Path
     ) -> None:
         # The reference must have exactly as many points as the distance arrays have corepoints.
-        from cntp.io import save_las
         from conftest import make_cloud
+
+        from cntp.io import save_las
 
         root, _ = pipeline_output_dir
         ref = root / "output" / "_ref_cache" / "ref_0.15_stable.las"
@@ -589,6 +597,7 @@ class TestReferenceOrthoPanel:
 
         # Outside the footprint the ortho is transparent, so it shows the same data shape as the
         # other panels in the row.
+        assert panel is not None
         alpha = panel["values"][..., 3]
         assert alpha[0, 0] == 0
         assert alpha[4, 4] > 0
@@ -652,8 +661,9 @@ class TestCoregAndSignalFigure:
     ) -> None:
         # Two cached references means the corepoint order is ambiguous; guessing would silently
         # pair distances with the wrong coordinates.
-        from cntp.io import save_las
         from conftest import make_cloud
+
+        from cntp.io import save_las
 
         root, dates = pipeline_output_dir
         save_las(make_cloud(n=400), root / "output" / "_ref_cache" / "ref_0.30_stable.las")
@@ -664,8 +674,9 @@ class TestCoregAndSignalFigure:
     def test_coreg_and_signal_figure__corepoint_count_mismatch(
         self, pipeline_output_dir: tuple[Path, list[str]]
     ) -> None:
-        from cntp.io import save_las
         from conftest import make_cloud
+
+        from cntp.io import save_las
 
         root, dates = pipeline_output_dir
         ref = root / "output" / "_ref_cache" / "ref_0.15_stable.las"

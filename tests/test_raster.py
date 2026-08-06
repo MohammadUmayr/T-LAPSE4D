@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 import rasterio
 from affine import Affine
+from conftest import GRID_SHAPE, GRID_TRANSFORM, UTM45N
 from rasterio.crs import CRS
 
 from cntp.raster import (
@@ -31,7 +32,6 @@ from cntp.raster import (
     save_ortho,
     stable_m3c2_raster,
 )
-from conftest import GRID_SHAPE, GRID_TRANSFORM, UTM45N
 
 
 def _scatter(n: int = 400, seed: int = 42) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

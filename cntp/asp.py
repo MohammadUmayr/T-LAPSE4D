@@ -32,13 +32,14 @@ from pathlib import Path
 
 import laspy
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import py4dgeo
 from pyproj import Transformer
-from cntp.coreg import extract_stable_terrain, run_m3c2, _NDWI_A, _NDWI_B
-from cntp.io import load_las, apply_glacier_mask, save_las, read_las_bounds
-from cntp.plot import plot_stable_terrain_diagnostics, plot_m3c2_distances, plot_m3c2_spatial
 
+from cntp.coreg import _NDWI_A, _NDWI_B, extract_stable_terrain, run_m3c2
+from cntp.io import apply_glacier_mask, load_las, read_las_bounds, save_las
+from cntp.plot import plot_m3c2_distances, plot_m3c2_spatial, plot_stable_terrain_diagnostics
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -105,9 +106,9 @@ def _read_asp_transform(transform_path: Path) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def wgs84_to_utm(
-    lon: np.ndarray,
-    lat: np.ndarray,
-    alt: np.ndarray,
+    lon: npt.ArrayLike,
+    lat: npt.ArrayLike,
+    alt: npt.ArrayLike,
     utm_epsg: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert WGS84 geographic coordinates to UTM.
@@ -132,9 +133,9 @@ def wgs84_to_utm(
 
 
 def utm_to_wgs84(
-    easting: np.ndarray,
-    northing: np.ndarray,
-    elevation: np.ndarray,
+    easting: npt.ArrayLike,
+    northing: npt.ArrayLike,
+    elevation: npt.ArrayLike,
     utm_epsg: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert UTM coordinates back to WGS84 geographic coordinates.
@@ -162,7 +163,7 @@ def apply_coreg_to_cameras(
     cameras_csv: Path,
     transform_path: Path,
     utm_epsg: int,
-    out_csv: Path = None,
+    out_csv: Path | None = None,
 ) -> pd.DataFrame:
     """Apply an ASP co-registration transform to camera positions.
 
@@ -282,8 +283,8 @@ def las_utm_to_ecef(
 def apply_coreg_to_cameras_ecef(
     cameras_csv: Path,
     transform_path: Path,
-    out_csv: Path = None,
-    utm_epsg: int = None,
+    out_csv: Path | None = None,
+    utm_epsg: int | None = None,
 ) -> "pd.DataFrame":
     """Apply an ASP co-registration transform to camera positions.
 
@@ -343,7 +344,7 @@ def apply_coreg_to_cameras_ecef(
 
 
 def _apply_transform_to_las(las_path: Path, T: np.ndarray, out_path: Path,
-                             utm_epsg: int = None,
+                             utm_epsg: int | None = None,
                              chunk_size: int = 2_000_000) -> None:
     """Apply 4×4 homogeneous transform *T* to a LAZ/LAS cloud and write *out_path*.
 
@@ -423,7 +424,7 @@ def pc_align_stage(
     output_prefix: Path,
     alignment_method: str,
     max_displacement: float,
-    initial_transform: Path = None,
+    initial_transform: Path | None = None,
     outlier_ratio: float = 0.75,
     verbose: bool = False,
 ) -> Path:
@@ -487,9 +488,9 @@ def pc_align_stage(
 def extract_stable_reference(
     ref_cloud_path: Path,
     output_dir: Path,
-    glacier_mask_path: Path = None,
+    glacier_mask_path: Path | None = None,
     slope_threshold: float = 60.0,
-    plot_dir: Path = None,
+    plot_dir: Path | None = None,
 ) -> Path:
     """Build the glacier-masked, slope-filtered reference cloud for Stage 3.
 
@@ -572,7 +573,7 @@ def pc_align_p2p_sp2p(
     tba_las: Path,
     ref_las: Path,
     output_dir: Path,
-    stable_ref_las: Path = None,
+    stable_ref_las: Path | None = None,
     p2p_max_displacement: float = 2.0,
     sp2p_max_displacement: float = 1.0,
     m_sp2p_max_displacement: float = 0.1,
@@ -580,8 +581,8 @@ def pc_align_p2p_sp2p(
     sp2p_outlier_ratio: float = 0.75,
     m_sp2p_outlier_ratio: float = 0.75,
     ref_downsample_factor: float = 1.0,
-    tba_downsample_factor: float = None,
-    utm_epsg: int = None,
+    tba_downsample_factor: float | None = None,
+    utm_epsg: int | None = None,
     verbose: bool = False,
 ) -> tuple:
     """Three-stage ICP co-registration following Knuth et al. (2023) §4.3.3.
@@ -811,16 +812,16 @@ def pc_align_p2p_sp2p(
 # ---------------------------------------------------------------------------
 
 def evaluate_coreg(
-    ref_las: Path,
+    ref_las: Path | None,   # ignored (and may be None) when stable_ref_las is given
     tba_before_las: Path,
     tba_after_las: Path,
     ref_downsample_factor: float = 0.5,
-    tba_downsample_factor: float = None,
+    tba_downsample_factor: float | None = None,
     slope_threshold: float = 60.0,
-    glacier_mask_path: Path = None,
-    plot_dir: Path = None,
-    stable_dir: Path = None,
-    stable_ref_las: Path = None,
+    glacier_mask_path: Path | None = None,
+    plot_dir: Path | None = None,
+    stable_dir: Path | None = None,
+    stable_ref_las: Path | None = None,
 ) -> dict:
     """Compute M3C2 distances on stable terrain before and after co-registration.
 
@@ -877,6 +878,8 @@ def evaluate_coreg(
     if stable_ref_las is not None:
         ref_stable = load_las(Path(stable_ref_las))
     else:
+        if ref_las is None:
+            raise ValueError("evaluate_coreg needs either ref_las or stable_ref_las; both are None.")
         ref = load_las(ref_las, downsample_factor=ref_downsample_factor)
         if glacier_mask_path is not None:
             ref = apply_glacier_mask(ref, glacier_mask_path)
@@ -958,12 +961,12 @@ def evaluate_coreg(
 
 def point2dem(
     cloud_las: str | Path,
-    out_prefix: str | Path = None,
+    out_prefix: str | Path | None = None,
     res: float = 1.0,
-    utm_epsg: int = None,
+    utm_epsg: int | None = None,
     max_gap_pixels: int = 1,
     nodata: float = -9999.0,
-    ref_las: str | Path = None,
+    ref_las: str | Path | None = None,
     extra_args: tuple = (),
     verbose: bool = False,
 ) -> Path:

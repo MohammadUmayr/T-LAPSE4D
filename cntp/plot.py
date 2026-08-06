@@ -1,6 +1,7 @@
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
 from tqdm.auto import tqdm
 
 
@@ -639,8 +640,8 @@ def _nice_scalebar_len(width_m, *, frac=0.25):
 def _add_scalebar(ax, length_m, *, label=None, color="white", loc="lower right",
                   thickness_m=None):
     """Anchored scale bar *length_m* metres long (axes extent is in metres)."""
-    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
     import matplotlib.font_manager as fm
+    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
     if label is None:
         label = f"{length_m/1000:g} km" if length_m >= 1000 else f"{length_m:g} m"
     if thickness_m is None:
@@ -801,8 +802,8 @@ def plot_absolute_accuracy_boxes(records, *, area_is_m2=True, bin_days=14,
     dashed zero line; y auto-fits the whiskers symmetric about 0 unless ``ylim``
     is given. ``bin_days`` only sets the cadence word in the title.
     """
-    import matplotlib.dates as mdates
     import matplotlib.colors as mcolors
+    import matplotlib.dates as mdates
     from matplotlib.cm import ScalarMappable
     from matplotlib.lines import Line2D
 

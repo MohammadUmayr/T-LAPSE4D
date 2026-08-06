@@ -16,6 +16,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from conftest import GRID_SHAPE, GRID_TRANSFORM, make_cloud
 
 from cntp.plot import (
     _nice_scalebar_len,
@@ -30,7 +31,6 @@ from cntp.plot import (
     plot_stable_terrain_geometry,
     plot_stable_terrain_rgb,
 )
-from conftest import GRID_SHAPE, GRID_TRANSFORM, make_cloud
 
 EXTENT = (
     GRID_TRANSFORM.c,

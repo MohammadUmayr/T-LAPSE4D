@@ -17,21 +17,20 @@ lives in ``contributors/umayr/tools.py``.
 
 from pathlib import Path
 
+import geopandas as gpd
+import laspy
 import numpy as np
 import pandas as pd
+import py4dgeo
 import rasterio
 import rasterio.features
 import rasterio.transform
 from rasterio.errors import RasterioIOError
 from scipy.interpolate import griddata
 from scipy.spatial import cKDTree
-import laspy
-import geopandas as gpd
-import py4dgeo
 
-from cntp.io import load_las, read_las_bounds
 from cntp.coreg import _NDWI_A, _NDWI_B, run_m3c2
-
+from cntp.io import load_las, read_las_bounds
 
 # ---------------------------------------------------------------------------
 # GeoTIFF I/O
@@ -164,7 +163,7 @@ def build_dem_and_ortho(
     name_stem: str,
     res: float = 1.0,
     max_gap_pixels: int = 1,
-    utm_epsg: int = None,
+    utm_epsg: int | None = None,
     cloud_downsample: float = 1.0,
     overwrite: bool = False,
 ) -> tuple:
@@ -261,6 +260,11 @@ def build_dem_and_ortho(
     x, y, z = cloud[:, 0], cloud[:, 1], cloud[:, 2]
     rgb     = cloud[:, 3:6]
 
+    # A write refused by a read-only mount is reported as None rather than raising, so a batch run
+    # over many dates isn't aborted by one unwritable destination.
+    dem_out:   Path | None = dem_path
+    ortho_out: Path | None = ortho_path
+
     # ── 4. DEM (cubic griddata + KDTree gap mask) ──────────────────────────
     zi = interpolate_and_mask(x, y, z, xi, yi, res, max_gap_pixels)
     try:
@@ -268,7 +272,7 @@ def build_dem_and_ortho(
     except RasterioIOError as e:
         if "Permission denied" in str(e):
             print(f"  Skipping DEM (permission denied): {dem_path}")
-            dem_path = None
+            dem_out = None
         else:
             raise
 
@@ -279,11 +283,11 @@ def build_dem_and_ortho(
     except RasterioIOError as e:
         if "Permission denied" in str(e):
             print(f"  Skipping ortho (permission denied): {ortho_path}")
-            ortho_path = None
+            ortho_out = None
         else:
             raise
 
-    return dem_path, ortho_path
+    return dem_out, ortho_out
 
 
 def build_dem_and_ortho_p2d(
@@ -293,7 +297,7 @@ def build_dem_and_ortho_p2d(
     name_stem: str,
     res: float = 1.0,
     max_gap_pixels: int = 1,
-    utm_epsg: int = None,
+    utm_epsg: int | None = None,
     cloud_downsample: float = 1.0,
     overwrite: bool = False,
     verbose: bool = False,
@@ -325,7 +329,7 @@ def build_dem_and_ortho_p2d(
 
     Parameters / returns mirror :func:`build_dem_and_ortho`.
     """
-    from cntp.asp import point2dem      # local import — avoids any import cycle
+    from cntp.asp import point2dem  # local import — avoids any import cycle
 
     cloud_las = Path(cloud_las)
     ref_las   = Path(ref_las)
@@ -375,7 +379,7 @@ def build_reference_dem_and_ortho(
     cache_dir: str | Path,
     res: float = 1.0,
     max_gap_pixels: int = 1,
-    utm_epsg: int = None,
+    utm_epsg: int | None = None,
     cloud_downsample: float = 1.0,
     overwrite: bool = False,
 ) -> tuple:
@@ -437,7 +441,7 @@ def build_reference_dem_and_ortho(
 def build_dod(
     ref_dem_path: str | Path,
     day_dem_path: str | Path,
-    out_path: str | Path = None,
+    out_path: str | Path | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Compute a DEM of Difference: ``day_dem - ref_dem`` on the common grid.
@@ -530,10 +534,10 @@ def build_dod(
 
 def extract_stable_terrain_from_dem(
     dem_path: str | Path,
-    ortho_path: str | Path = None,
-    glacier_mask_path: str | Path = None,
+    ortho_path: str | Path | None = None,
+    glacier_mask_path: str | Path | None = None,
     slope_threshold: float = 60.0,
-    out_path: str | Path = None,
+    out_path: str | Path | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Raster analogue of ``cntp.coreg.extract_stable_terrain`` + glacier mask.
@@ -677,9 +681,9 @@ def m3c2_to_raster(
     ref_las: str | Path,
     day_las: str | Path,
     out_path: str | Path,
-    grid_anchor_las: str | Path = None,
+    grid_anchor_las: str | Path | None = None,
     res: float = 1.0,
-    utm_epsg: int = None,
+    utm_epsg: int | None = None,
     normal_radii: float = 2.5,
     cyl_radius: float = 2.5,
     max_distance: float = 30.0,

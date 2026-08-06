@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import UTM45N
 
 from cntp.asp import (
     _apply_transform_to_las,
@@ -31,7 +32,6 @@ from cntp.asp import (
     utm_to_wgs84,
     wgs84_to_utm,
 )
-from conftest import UTM45N
 
 # Changri Nup, Khumbu — inside UTM zone 45N.
 LON, LAT, ALT = 86.78, 27.98, 5400.0
@@ -496,10 +496,10 @@ class TestExtractStableReference:
 
     def test_extract_stable_reference__glacier_mask_applied(self, tmp_path: Path, write_cloud_las) -> None:
         import geopandas as gpd
+        from conftest import GRID_SHAPE, GRID_TRANSFORM
         from shapely.geometry import box
 
         from cntp.io import load_las
-        from conftest import GRID_SHAPE, GRID_TRANSFORM
 
         src = write_cloud_las("ref.las")
         # Mask the western half of the footprint.

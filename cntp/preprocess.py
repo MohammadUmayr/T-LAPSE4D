@@ -289,7 +289,7 @@ def ensure_standardized(
     Path
         The directory to hand to the pipeline as ``tlcam_dir``.
     """
-    from cntp.metashape import discover_images   # lazy: avoid import cycle
+    from cntp.metashape import discover_images  # lazy: avoid import cycle
 
     image_dir = Path(image_dir)
 

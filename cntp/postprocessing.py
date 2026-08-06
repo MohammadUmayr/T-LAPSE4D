@@ -20,12 +20,12 @@ import rasterio
 
 from cntp.io import load_las
 from cntp.plot import (
+    _robust_vmax,
+    data_window,
+    plot_absolute_accuracy_boxes,
     plot_m3c2_coreg_and_signal,
     plot_maps_row,
     plot_relative_accuracy_boxplot,
-    plot_absolute_accuracy_boxes,
-    data_window,
-    _robust_vmax,
 )
 
 
@@ -139,12 +139,12 @@ def _is_iso_date(s: str) -> bool:
 @dataclass
 class SignalStack:
     """A time stack of co-registered M3C2 signal rasters on one shared grid."""
-    dates: list
-    times: object
-    cube: object
-    transform: object
-    crs: object
-    paths: list
+    dates: list[str]
+    times: np.ndarray                 # datetime64[D], one per date
+    cube: np.ndarray                  # (T, H, W) float32, NaN nodata
+    transform: Any                    # affine.Affine
+    crs: Any                          # rasterio.crs.CRS
+    paths: list[Path]
 
     def __len__(self) -> int:
         return len(self.dates)
@@ -554,7 +554,7 @@ def _reference_ortho_panel(
     if not ref_ortho.exists():
         print(f"  [warn] no reference ortho at {ref_ortho} — skipping ortho panel")
         return None
-    from rasterio.warp import reproject, Resampling
+    from rasterio.warp import Resampling, reproject
     H, W = stack.cube.shape[1:]
     with rasterio.open(ref_ortho) as src:
         src_arr = src.read()
@@ -750,7 +750,7 @@ def absolute_accuracy_boxplots(
                       f"{f' (from {max_nmad_from})' if max_nmad_from else ''}")
             ok = gated
         else:
-            print(f"  [warn] no acquisition passes the NMAD gate — gate ignored")
+            print("  [warn] no acquisition passes the NMAD gate — gate ignored")
     usable = np.where(ok)[0]
     if usable.size == 0:
         raise ValueError("no acquisitions with valid stable distances")
@@ -781,7 +781,7 @@ def absolute_accuracy_boxplots(
                 records.append(rec)
     else:
         for r_sel in usable:
-            rec = _record(r_sel, idx[r_sel], 0)
+            rec = _record(int(r_sel), idx[r_sel], 0)
             if rec is not None:
                 records.append(rec)
     if not records:

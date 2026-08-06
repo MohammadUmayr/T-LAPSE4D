@@ -1,4 +1,5 @@
 import os
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # Let OpenMP-aware libraries (py4dgeo M3C2, scipy BLAS, numpy BLAS, …) use
 # all available cores by default. Was previously pinned to "1" defensively

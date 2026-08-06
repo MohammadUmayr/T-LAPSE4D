@@ -1,7 +1,8 @@
-import numpy as np
-import laspy
 from pathlib import Path
+
 import geopandas as gpd
+import laspy
+import numpy as np
 import shapely
 
 
@@ -48,6 +49,7 @@ def load_las(path: str | Path, downsample_factor: float = 1.0) -> np.ndarray:
     with open(Path(path), "rb") as f, laspy.LasReader(f) as reader:
         for chunk in reader.chunk_iterator(chunk_size):
             n = len(chunk)
+            idx: np.ndarray | slice
             if downsample_factor < 1.0:
                 k = max(1, int(n * downsample_factor))
                 idx = rng.choice(n, size=k, replace=False)
@@ -68,7 +70,7 @@ def load_las(path: str | Path, downsample_factor: float = 1.0) -> np.ndarray:
     return np.vstack(chunks)
 
 
-def save_las(data: np.ndarray, path: str | Path, crs: int = None) -> None:
+def save_las(data: np.ndarray, path: str | Path, crs: int | None = None) -> None:
     """Save an Nx9 array (X, Y, Z, R, G, B, NX, NY, NZ) to a .las/.laz file.
 
     RGB values are expected in 0-255 range and stored as LAS uint16 (0-65535).

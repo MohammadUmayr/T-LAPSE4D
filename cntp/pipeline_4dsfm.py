@@ -22,21 +22,21 @@ from pathlib import Path
 
 import pandas as pd
 
-from cntp.metashape import (
-    discover_images,
-    run_multitemporal_ba,
-    run_single_day_fixed_iop,
-    rebuild_coreg_cloud,
-    update_registry,
-    _utm_epsg,
-)
 from cntp.asp import (
+    apply_coreg_to_cameras_ecef,
+    evaluate_coreg,
     extract_stable_reference,
     pc_align_p2p_sp2p,
-    evaluate_coreg,
-    apply_coreg_to_cameras_ecef,
 )
-from cntp.io import load_las, save_las, apply_glacier_mask
+from cntp.io import apply_glacier_mask, load_las, save_las
+from cntp.metashape import (
+    _utm_epsg,
+    discover_images,
+    rebuild_coreg_cloud,
+    run_multitemporal_ba,
+    run_single_day_fixed_iop,
+    update_registry,
+)
 
 
 def run_4dsfm_day(
@@ -375,9 +375,10 @@ def run_4dsfm_day(
     # Near-zero → ASP transform was correctly propagated into the rebuild.
     if run_validation and (overwrite or not validated_stable.exists()):
         print(f"\n[Step 6b] Validate rebuilt cloud — {new_date}")
+        import matplotlib.pyplot as plt
         import numpy as np
         import py4dgeo
-        import matplotlib.pyplot as plt
+
         from cntp.coreg import extract_stable_terrain, run_m3c2
 
         val_cloud = load_las(validated_laz, downsample_factor=tba_downsample)
@@ -580,14 +581,15 @@ def run_4dsfm_day_with_rasters(
     # module's hot import path.
     import laspy
     import rasterio
+
+    from cntp.plot import plot_dod_histogram
     from cntp.raster import (
-        build_reference_dem_and_ortho,
         build_dem_and_ortho,
         build_dem_and_ortho_p2d,
         build_dod,
+        build_reference_dem_and_ortho,
         m3c2_to_raster,
     )
-    from cntp.plot import plot_dod_histogram
 
     output_dir   = Path(output_dir)
     ref_cloud    = Path(ref_cloud)

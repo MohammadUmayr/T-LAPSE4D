@@ -270,7 +270,7 @@ def discover_images(
         m = _IMG_RE.match(img.name)
         if not m:
             continue
-        if lo is not None and not (lo <= int(m.group("time")[:2]) <= hi):
+        if lo is not None and hi is not None and not (lo <= int(m.group("time")[:2]) <= hi):
             continue   # outside the daytime window — skip night / motion frame
         if _camera_excluded(m.group("cam"), m.group("date"), exclude_cameras):
             continue   # camera physically compromised over this window — drop it
@@ -445,7 +445,7 @@ def _export_calib_xml(
 def update_metashape_cameras_after_transform(
     psx_path: Path,
     transform_path: Path,
-    chunk_label: str = None,
+    chunk_label: str | None = None,
 ) -> None:
     """Apply an ASP pc_align ECEF transform directly to the Metashape chunk transform.
 
@@ -476,6 +476,7 @@ def update_metashape_cameras_after_transform(
         raise ImportError("Metashape Python module is not installed.")
 
     import math
+
     import numpy as np
 
     # Parse ASP 4×4 ECEF transform: one header line then four rows of four floats.
@@ -783,9 +784,9 @@ def bootstrap_registry(
     ref_date: str,
     output_dir: str | Path,
     registry_csv: str | Path,
-    cameras_csv_out: str | Path = None,
-    calib_dir_out: str | Path = None,
-    ref_cloud_out: str | Path = None,
+    cameras_csv_out: str | Path | None = None,
+    calib_dir_out: str | Path | None = None,
+    ref_cloud_out: str | Path | None = None,
     export_ref_cloud: bool = True,
     overwrite: bool = False,
 ) -> dict:
