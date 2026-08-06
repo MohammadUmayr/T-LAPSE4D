@@ -14,6 +14,8 @@ dependencies:
   - htop
   - tree
   - pytest          # run the test suite under tests/
+  - coverage        # `coverage run -m pytest && coverage report` (configured in pyproject.toml)
+  - pre-commit      # `pre-commit install` once, then the hooks run on every commit
 
   - laspy
 

@@ -9,3 +9,36 @@ description = "A library for generating and processing point clouds from the tim
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# --strict-markers turns a mistyped @pytest.mark.foo into a collection error rather than a silently
+# ignored decorator — a test you believe is skipped would otherwise run, and vice versa.
+addopts = "--strict-markers --strict-config"
+filterwarnings = [
+    # laspy's ctypes structs warn under Python 3.14; not actionable from here.
+    "ignore:Due to '_pack_':DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["cntp"]
+# Branch coverage reports untested `else` paths, not just untested lines.
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.mypy]
+# No type stubs exist for Metashape, py4dgeo, laspy or rasterio.
+ignore_missing_imports = true
+show_error_codes = true
