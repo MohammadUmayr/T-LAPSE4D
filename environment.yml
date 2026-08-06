@@ -3,6 +3,11 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  # Pinned so a fresh `conda env create` and CI resolve the same interpreter. Without it conda picks
+  # whatever is newest at the time, and two machines built weeks apart can end up on different
+  # Python versions with different resolved dependencies.
+  - python=3.14
+
   - xdem
   - numba
   - tqdm
