@@ -353,42 +353,226 @@ def load_stable_distance_stack(output_dir, *, which="after", dates=None,
     return ds, times, matrix
 
 
-def stable_precision_arrays(output_dir, *, which="after", min_obs=3,
-                            date_from=None, date_to=None):
-    """Per-corepoint stable-terrain SD and NMAD arrays (relative-accuracy inputs).
+def load_stable_grid_stack(output_dir, *, which="after", res=1.0,
+                           stable_ref_las=None, date_from=None, date_to=None):
+    """Per-date stable-terrain M3C2 distances binned onto a ``res``-metre grid.
 
-    Returns ``(sd, nmad)`` over corepoints with ``>= min_obs`` finite obs (others
-    NaN). Stacks the ``.npz`` stable distances in corepoint space (no regrid).
+    Loads the point-space distances (:func:`load_stable_distance_stack`), places
+    each corepoint on a ``res``-metre grid using the cached stable reference's
+    coordinates, and takes the **median of the corepoints in each cell, per
+    date**. Returns ``(times, grid)`` where ``grid`` is ``(T, n_cells)`` float32
+    with NaN for cells that date did not observe.
+
+    Both accuracy figures reduce this one matrix — the absolute accuracy across
+    cells (per row, one box per acquisition), the relative accuracy along time
+    (per column, SD/NMAD per cell) — so they share a unit and are comparable.
+
+    Gridding is what makes the statistics reportable: corepoint density varies
+    from one to several hundred points per square metre, so reducing in point
+    space would weight the result by point density rather than by area (flattering
+    it, since dense patches are the well-observed low-noise ones) and would not
+    share its unit with the per-pixel M3C2 maps. On the grid every square metre of
+    stable ground counts once, and the numbers describe the precision of the
+    gridded M3C2 product itself.
     """
-    _, _, mat = load_stable_distance_stack(
+    import pandas as pd
+
+    _, times, mat = load_stable_distance_stack(
         output_dir, which=which, date_from=date_from, date_to=date_to)
-    count = np.isfinite(mat).sum(axis=0).astype(np.int32)
-    valid = count >= min_obs
-    nmad, _ = _nanmad(mat)
+
+    stable_ref_las = stable_ref_las or _discover_stable_ref(output_dir)
+    if stable_ref_las is None:
+        raise FileNotFoundError(
+            f"no cached stable reference (*_stable.las) under "
+            f"{Path(output_dir) / 'output' / '_ref_cache'} — needed for the "
+            f"corepoint coordinates that place each distance on the grid."
+        )
+    xy = load_las(Path(stable_ref_las))[:, :2]
+    if xy.shape[0] != mat.shape[1]:
+        raise ValueError(
+            f"stable reference has {xy.shape[0]} points but the distance stack "
+            f"has {mat.shape[1]} corepoints — the cached stable reference was "
+            f"rebuilt mid-record; re-run the affected dates against one reference."
+        )
+
+    # The corepoints are fixed across dates, so the cell index is computed once.
+    cells = np.stack([np.floor(xy[:, 0] / res).astype(np.int64),
+                      np.floor(xy[:, 1] / res).astype(np.int64)], axis=1)
+    _, inv = np.unique(cells, axis=0, return_inverse=True)
+    n_cells = int(inv.max()) + 1
+
+    grid = np.full((mat.shape[0], n_cells), np.nan, dtype="float32")
+    for t in range(mat.shape[0]):
+        v = mat[t]
+        m = np.isfinite(v)
+        if not m.any():
+            continue
+        s = pd.Series(v[m]).groupby(inv[m]).median()
+        grid[t, s.index.to_numpy()] = s.to_numpy()
+
+    print(f"  Gridded stable distances to {res:g} m -> {grid.shape[0]} dates "
+          f"x {n_cells:,} cells ({n_cells * res * res:,.0f} m^2 stable)")
+    return times, grid
+
+
+def _nmad_keep_mask(times, date_nmad, max_nmad, max_nmad_from):
+    """Keep-mask over acquisitions: drop those with ``NMAD >= max_nmad``.
+
+    When ``max_nmad_from`` (``YYYY-MM-DD``) is given the threshold applies only
+    on/after that date — acquisitions before it are always kept. Use that when a
+    known event degrades part of the record (cameras lost, a cloudy season) and
+    the earlier, unaffected period should be reported as-is. ``max_nmad=None``
+    keeps everything.
+    """
+    import pandas as pd
+    keep = np.ones(len(times), dtype=bool)
+    if max_nmad is None:
+        return keep
+    t = pd.to_datetime(np.asarray(times, dtype="datetime64[D]"))
+    in_window = (np.ones(len(t), dtype=bool) if max_nmad_from is None
+                 else np.asarray(t >= pd.Timestamp(max_nmad_from), dtype=bool))
+    bad = in_window & ~(date_nmad < max_nmad)      # NaN NMAD -> dropped in window
+    return keep & ~bad
+
+
+def per_acquisition_nmad(grid):
+    """Per-acquisition post-coreg stable NMAD from a gridded stable stack."""
     with np.errstate(all="ignore"):
-        sd = np.nanstd(mat, axis=0)
+        med = np.nanmedian(grid, axis=1)
+        return 1.4826 * np.nanmedian(np.abs(grid - med[:, None]), axis=1)
+
+
+def stable_precision_arrays(output_dir, *, which="after", min_obs=3, res=1.0,
+                            max_nmad=None, max_nmad_from=None,
+                            stable_ref_las=None, date_from=None, date_to=None):
+    """Per-pixel stable-terrain SD and NMAD on a ``res``-metre grid.
+
+    Reduces the gridded stable stack (:func:`load_stable_grid_stack`) along time:
+    the per-cell temporal SD and NMAD over cells with ``>= min_obs`` valid dates.
+    Returns ``(sd, nmad)``, NaN where a cell has too few observations. These are
+    the relative-accuracy (precision) inputs — same 1 m unit as the M3C2 maps and
+    as the absolute-accuracy boxes.
+
+    ``max_nmad`` / ``max_nmad_from`` drop poorly co-registered acquisitions before
+    the reduction (see :func:`_nmad_keep_mask`); both default to off.
+    """
+    times, grid = load_stable_grid_stack(
+        output_dir, which=which, res=res, stable_ref_las=stable_ref_las,
+        date_from=date_from, date_to=date_to)
+    if max_nmad is not None:
+        dates = [str(d) for d in np.asarray(times, dtype="datetime64[D]")]
+        keep = _nmad_keep_mask(times, load_coreg_nmad(output_dir, dates),
+                               max_nmad, max_nmad_from)
+        print(f"  NMAD gate (>= {max_nmad} m"
+              f"{f', from {max_nmad_from}' if max_nmad_from else ''}): "
+              f"kept {int(keep.sum())}/{keep.size} acquisitions")
+        grid = grid[keep]
+    count = np.isfinite(grid).sum(axis=0).astype(np.int32)
+    valid = count >= min_obs
+    nmad, _ = _nanmad(grid)
+    with np.errstate(all="ignore"):
+        sd = np.nanstd(grid, axis=0)
     return np.where(valid, sd, np.nan), np.where(valid, nmad, np.nan)
 
 
-def pixel_relative_accuracy(output_dir, *, kind="M3C2_raster", date_from=None,
-                            date_to=None, min_obs=3, which="after", plot_dir=None,
-                            site_label=None, count_cmap="magma", nmad_cmap="viridis",
-                            nmad_vmax=None, nmad_vmax_pct=98.0, scalebar_m="auto",
-                            box_ylim=None, show=False, save_pdf=True):
-    """Relative accuracy from the M3C2 signal (coverage + NMAD maps + boxplot).
+def load_coreg_nmad(output_dir, dates):
+    """Post-coreg stable-terrain NMAD per acquisition, from the pipeline's stats.
 
-    Writes ``pixel_maps.png`` (coverage + whole-footprint per-pixel NMAD maps,
-    side by side on one shared window; NMAD gated at ``min_obs``, ``vmax``
-    auto-scaled to the ``nmad_vmax_pct``-th percentile unless ``nmad_vmax`` is
-    given) and ``stable_relative_accuracy.png`` (SD/NMAD boxplot over
-    stable terrain, from the ``.npz`` corepoint stack, same ``min_obs``) to
-    *plot_dir* (default ``output/postprocessing/precision/``). Returns the maps
-    + stable summary dict.
+    Reads the ``after`` row of ``output/<date>/coreg/<date>_m3c2_stats.csv`` — the
+    number coregistration already reported — so nothing has to be re-loaded or
+    re-computed. Returns a float array aligned with *dates*, NaN where the stats
+    file is missing.
+
+    This is the **gate**: one value per acquisition, describing that day's
+    coregistration quality. It is not the relative accuracy, which is a per-pixel
+    temporal statistic computed over the acquisitions this gate retains.
+    """
+    import pandas as pd
+    base = Path(output_dir) / "output"
+    out = np.full(len(dates), np.nan)
+    for i, d in enumerate(dates):
+        f = base / str(d) / "coreg" / f"{d}_m3c2_stats.csv"
+        if f.exists():
+            try:
+                out[i] = float(pd.read_csv(f, index_col="coreg").loc["after", "nmad"])
+            except Exception:
+                pass
+    return out
+
+
+def _reference_ortho_panel(output_dir, stack, footprint, *, title=None):
+    """RGBA ortho panel regridded to the stack grid and clipped to *footprint*.
+
+    Reads ``output/_ref_cache/reference_ortho.tif``, resamples it onto the M3C2
+    map grid (same CRS), and sets alpha=0 outside the boolean *footprint* mask so
+    the ortho shows only the data shape shared with the other panels. Returns a
+    panel dict for :func:`cntp.plot.plot_maps_row`, or None if the ortho is absent.
+    """
+    ref_ortho = Path(output_dir) / "output" / "_ref_cache" / "reference_ortho.tif"
+    if not ref_ortho.exists():
+        print(f"  [warn] no reference ortho at {ref_ortho} — skipping ortho panel")
+        return None
+    from rasterio.warp import reproject, Resampling
+    H, W = stack.cube.shape[1:]
+    with rasterio.open(ref_ortho) as src:
+        src_arr = src.read()
+        src_transform, src_crs = src.transform, src.crs
+    dst = np.zeros((src_arr.shape[0], H, W), dtype=src_arr.dtype)
+    reproject(source=src_arr, destination=dst,
+              src_transform=src_transform, src_crs=src_crs,
+              dst_transform=stack.transform, dst_crs=stack.crs,
+              resampling=Resampling.bilinear)
+    img = np.transpose(dst, (1, 2, 0))            # (H, W, bands)
+    rgb = img[..., :3]
+    alpha = img[..., 3] if img.shape[2] >= 4 else np.full((H, W), 255, np.uint8)
+    alpha = np.where(np.asarray(footprint, bool), alpha, 0).astype("uint8")
+    return {"values": np.dstack([rgb, alpha]), "rgb": True, "title": title}
+
+
+def pixel_relative_accuracy(output_dir, *, kind="M3C2_raster", date_from=None,
+                            date_to=None, min_obs=3, which="after", res=1.0,
+                            max_nmad=None, max_nmad_from=None,
+                            plot_dir=None, site_label=None, ortho=True,
+                            panel_size=6.0, count_cmap="magma",
+                            nmad_cmap="viridis", nmad_vmax=None, nmad_vmax_pct=98.0,
+                            scalebar_m="auto", box_ylim=None, show=False,
+                            save_pdf=True):
+    """Relative accuracy from the M3C2 signal (ortho + coverage + NMAD + boxplot).
+
+    Writes ``pixel_maps.png`` — the reference ortho (clipped to the coverage
+    footprint), the coverage map, and the whole-footprint per-pixel NMAD map, side
+    by side on one shared window (NMAD gated at ``min_obs``, ``vmax`` auto-scaled
+    to the ``nmad_vmax_pct``-th percentile unless ``nmad_vmax`` is given) — and
+    ``stable_relative_accuracy.png`` (SD/NMAD boxplot over stable terrain, same
+    ``min_obs``) to *plot_dir* (default ``output/postprocessing/precision/``). Set
+    ``ortho=False`` to drop the ortho panel. Figures are always written to
+    *plot_dir*; set ``show=True`` to also display them inline. Returns the maps +
+    stable summary dict.
+
+    ``panel_size`` is the height (inches) each map panel is built from — raise it
+    (e.g. 9-10) to render the rasters larger for visual inspection.
+
+    ``max_nmad`` / ``max_nmad_from`` drop poorly co-registered acquisitions, using
+    the per-date NMAD the pipeline reported (:func:`load_coreg_nmad`). The gate is
+    applied to the coverage map, the NMAD map and the relative accuracy alike, so
+    all three describe the same retained acquisitions and ``min_obs`` counts only
+    days that were actually used. ``max_nmad_from`` restricts the gate to a date
+    onward — for a record degraded partway through (cameras lost, a cloudy
+    season), leaving the earlier, unaffected period reported as-is.
     """
     stack = load_signal_stack(output_dir, kind=kind,
                               date_from=date_from, date_to=date_to)
-    out = None if show else Path(
-        plot_dir or Path(output_dir) / "output" / "postprocessing" / "precision")
+    if max_nmad is not None:
+        keep = _nmad_keep_mask(stack.times, load_coreg_nmad(output_dir, stack.dates),
+                               max_nmad, max_nmad_from)
+        print(f"  NMAD gate (>= {max_nmad} m"
+              f"{f', from {max_nmad_from}' if max_nmad_from else ''}): "
+              f"kept {int(keep.sum())}/{keep.size} acquisitions for the maps")
+        stack = SignalStack(
+            [d for d, k in zip(stack.dates, keep) if k], stack.times[keep],
+            stack.cube[keep], stack.transform, stack.crs,
+            [p for p, k in zip(stack.paths, keep) if k])
+    out = Path(plot_dir or Path(output_dir) / "output" / "postprocessing" / "precision")
     suffix = f" — {site_label}" if site_label else ""
 
     count = per_pixel_obs_count(stack).astype("float64")
@@ -397,22 +581,33 @@ def pixel_relative_accuracy(output_dir, *, kind="M3C2_raster", date_from=None,
     maps = per_pixel_nmad_map(stack, min_obs=min_obs)
     vmax = nmad_vmax if nmad_vmax is not None else _robust_vmax(
         maps["nmad"], pct=nmad_vmax_pct)
-    plot_maps_row(
-        [{"values": count, "cmap": count_cmap, "vmin": 0, "clabel": "Count",
-          "title": f"M3C2 raster count{suffix}"},
-         {"values": maps["nmad"], "cmap": nmad_cmap, "vmin": 0, "vmax": vmax,
-          "extend": "max", "clabel": "NMAD (m)",
-          "title": f"Per-pixel M3C2 raster NMAD{suffix}"}],
-        stack.extent, window=window, scalebar_m=scalebar_m, output_dir=out,
-        filename="pixel_maps.png", save_pdf=save_pdf)
+    panels = []
+    if ortho:
+        op = _reference_ortho_panel(output_dir, stack, np.isfinite(count),
+                                    title=f"UAV + TLC orthomosaic{suffix}")
+        if op is not None:
+            panels.append(op)
+    panels += [
+        {"values": count, "cmap": count_cmap, "vmin": 0, "clabel": "Count",
+         "title": f"M3C2 raster count{suffix}"},
+        {"values": maps["nmad"], "cmap": nmad_cmap, "vmin": 0, "vmax": vmax,
+         "extend": "max", "clabel": "NMAD (m)",
+         "title": f"Per-pixel M3C2 raster NMAD{suffix}"},
+    ]
+    plot_maps_row(panels, stack.extent, window=window, scalebar_m=scalebar_m,
+                  panel_size=panel_size, output_dir=out, filename="pixel_maps.png",
+                  save_pdf=save_pdf, show=show)
 
     sd, nmad = stable_precision_arrays(output_dir, which=which, min_obs=min_obs,
+                                       res=res, max_nmad=max_nmad,
+                                       max_nmad_from=max_nmad_from,
                                        date_from=date_from, date_to=date_to)
     stable = plot_relative_accuracy_boxplot(
         sd, nmad, ylim=box_ylim, output_dir=out,
-        title=f"Relative accuracy{suffix} (n>={min_obs})", save_pdf=save_pdf)
+        title=f"Relative accuracy{suffix} (n>={min_obs})", save_pdf=save_pdf,
+        show=show)
     print(f"\n  [{site_label or 'site'}] stable-terrain relative accuracy "
-          f"({stable['nmad']['n']:,} corepoints, n>={min_obs}, '{which}'):")
+          f"({stable['nmad']['n']:,} stable {res:g} m pixels, n>={min_obs}, '{which}'):")
     print(f"    NMAD — mean {stable['nmad']['mean']:.3f} m  "
           f"median {stable['nmad']['median']:.3f} m")
     print(f"    SD   — mean {stable['sd']['mean']:.3f} m  "
@@ -423,84 +618,109 @@ def pixel_relative_accuracy(output_dir, *, kind="M3C2_raster", date_from=None,
 
 
 def absolute_accuracy_boxplots(output_dir, *, which="after", bin_days=14,
-                               select="max_area", date_from=None, date_to=None,
+                               max_nmad=0.5, max_nmad_from=None,
+                               date_from=None, date_to=None,
                                stable_ref_las=None, res=1.0, ylim=None,
                                cmap="Blues", median_color="red", site_label=None,
                                plot_dir=None, filename="stable_absolute_accuracy.png",
                                show=False, save_pdf=True):
-    """Per-DEM stable-terrain absolute accuracy over time.
+    """Absolute accuracy of each acquisition over time, on stable terrain.
 
-    Each box is one DEM's stable-terrain elevation difference vs the reference
-    (post-coreg M3C2 ``which`` residuals), unpooled. To thin a daily record, one
-    representative DEM is drawn per ``bin_days``-day window (``select='max_area'``
-    = best-covered acquisition, ``select='nearest'`` = closest to window centre);
-    ``bin_days=None`` draws every acquisition. Boxes sit at their real dates and
-    are coloured by that DEM's stable surface area (km^2 from the corepoint
-    coords; falls back to corepoint count when the cached stable reference LAS is
-    missing). Returns the per-box records (date, area, median, iqr).
+    Each box is one acquisition's distribution of stable-terrain M3C2 ``which``
+    distances against the reference cloud (``"after"`` = post-coregistration),
+    binned onto the ``res``-metre grid (:func:`load_stable_grid_stack`) so one
+    sample = one square metre of stable ground. A box centred on 0 means
+    coregistration left no bias; the IQR/whiskers are that acquisition's
+    precision. The relative-accuracy figure reduces the same gridded matrix along
+    time, so the two are directly comparable.
+
+    Acquisitions whose post-coreg stable NMAD is ``>= max_nmad`` (default 0.5 m)
+    are excluded first — these are failed coregistrations whose metre-scale bias
+    and spread would otherwise dominate the plot. Set ``max_nmad=None`` to keep
+    every acquisition.
+
+    Boxes are then drawn on a regular ``bin_days``-day cadence: each slot takes
+    the acquisition **nearest** to that slot's date, in either direction, so gaps
+    in the record are filled by the closest acquisition. If two are equidistant,
+    the one with the **lower post-coreg stable NMAD** wins. ``bin_days=None``
+    instead draws every (surviving) acquisition at its own date.
+
+    Boxes are coloured by that acquisition's stable surface area (m^2 = the number
+    of grid cells it observed). The figure is always written to *plot_dir*; set
+    ``show=True`` to also display it inline. Returns the per-box records
+    (``date`` = slot date, ``source_date`` = acquisition used, ``offset_days``,
+    ``area``, ``median``, ``iqr``).
     """
     import pandas as pd
 
-    _, times, mat = load_stable_distance_stack(
-        output_dir, which=which, date_from=date_from, date_to=date_to)
-
-    coords = None
-    stable_ref_las = stable_ref_las or _discover_stable_ref(output_dir)
-    if stable_ref_las is not None and Path(stable_ref_las).exists():
-        xy = load_las(Path(stable_ref_las))[:, :2]
-        if xy.shape[0] == mat.shape[1]:
-            coords = xy
-        else:
-            print(f"  [warn] stable ref has {xy.shape[0]} pts but stack has "
-                  f"{mat.shape[1]} corepoints — colouring by count, not km^2.")
-    area_is_km2 = coords is not None
-    if coords is not None:
-        cell = (np.floor(coords[:, 0] / res).astype(np.int64),
-                np.floor(coords[:, 1] / res).astype(np.int64))
-
-    def _area(occupied):
-        if coords is None:
-            return int(occupied.sum())
-        ids = cell[0][occupied] * (10 ** 9) + cell[1][occupied]
-        return np.unique(ids).size * (res * res) / 1e6
+    times, grid = load_stable_grid_stack(
+        output_dir, which=which, res=res, stable_ref_las=stable_ref_las,
+        date_from=date_from, date_to=date_to)
 
     idx = pd.to_datetime(times.astype("datetime64[D]"))
-    if bin_days:
-        origin = idx.min().normalize()
-        key = ((idx - origin).days // bin_days).to_numpy()
-    else:
-        key = np.arange(len(idx))
-    finite_per_date = np.isfinite(mat).sum(axis=1)
+    cells_per_date = np.isfinite(grid).sum(axis=1)        # occupied 1 m cells
 
-    records = []
-    for b in np.unique(key):
-        rows = np.where(key == b)[0]
-        if finite_per_date[rows].max() == 0:
-            continue
-        if bin_days and select == "nearest":
-            c = origin + pd.Timedelta(days=(b + 0.5) * bin_days)
-            r_sel = rows[np.argmin(np.abs((idx[rows] - c).days.to_numpy()))]
+    # Per-acquisition post-coreg stable NMAD, on the same grid: gates out failed
+    # coregistrations, and breaks ties when two acquisitions are equally close.
+    with np.errstate(all="ignore"):
+        med = np.nanmedian(grid, axis=1)
+        date_nmad = 1.4826 * np.nanmedian(np.abs(grid - med[:, None]), axis=1)
+
+    ok = cells_per_date > 0
+    if max_nmad is not None:
+        dates = [str(d) for d in np.asarray(times, dtype="datetime64[D]")]
+        gated = ok & _nmad_keep_mask(times, load_coreg_nmad(output_dir, dates),
+                                     max_nmad, max_nmad_from)
+        n_drop = int(ok.sum() - gated.sum())
+        if gated.any():
+            if n_drop:
+                print(f"  Excluded {n_drop} acquisition(s): post-coreg NMAD "
+                      f">= {max_nmad} m"
+                      f"{f' (from {max_nmad_from})' if max_nmad_from else ''}")
+            ok = gated
         else:
-            r_sel = rows[np.argmax(finite_per_date[rows])]
-        vals = mat[r_sel]
+            print(f"  [warn] no acquisition passes the NMAD gate — gate ignored")
+    usable = np.where(ok)[0]
+    if usable.size == 0:
+        raise ValueError("no acquisitions with valid stable distances")
+
+    def _record(r_sel, slot_date, offset_days):
+        vals = grid[r_sel]
         vals = vals[np.isfinite(vals)]
         if vals.size == 0:
-            continue
-        occupied = np.isfinite(mat[r_sel])
-        records.append({
-            "date": idx[r_sel], "area": _area(occupied), "vals": vals,
+            return None
+        return {
+            "date": slot_date, "source_date": idx[r_sel],
+            "offset_days": int(offset_days),
+            "area": float(vals.size * res * res),         # m^2 of stable ground
+            "vals": vals,
             "median": float(np.median(vals)),
             "iqr": float(np.subtract(*np.percentile(vals, [75, 25]))),
-        })
-    if not records:
-        raise ValueError("no non-empty windows to plot")
+        }
 
-    out = None if show else Path(
-        plot_dir or Path(output_dir) / "output" / "postprocessing" / "precision")
+    records = []
+    if bin_days:
+        slots = pd.date_range(idx.min().normalize(), idx.max(), freq=f"{bin_days}D")
+        for t in slots:
+            d = np.abs((idx[usable] - t).days.to_numpy())
+            near = usable[d == d.min()]                   # closest, either side
+            r_sel = near[np.argmin(date_nmad[near])]      # tie -> lowest NMAD
+            rec = _record(r_sel, t, (idx[r_sel] - t).days)
+            if rec is not None:
+                records.append(rec)
+    else:
+        for r_sel in usable:
+            rec = _record(r_sel, idx[r_sel], 0)
+            if rec is not None:
+                records.append(rec)
+    if not records:
+        raise ValueError("no boxes to plot")
+
+    out = Path(plot_dir or Path(output_dir) / "output" / "postprocessing" / "precision")
     plot_absolute_accuracy_boxes(
-        records, area_is_km2=area_is_km2, bin_days=bin_days, site_label=site_label,
+        records, area_is_m2=True, bin_days=bin_days, site_label=site_label,
         cmap=cmap, median_color=median_color, ylim=ylim, output_dir=out,
-        filename=filename, save_pdf=save_pdf)
+        filename=filename, save_pdf=save_pdf, show=show)
     for r in records:
         r.pop("vals", None)
     return records

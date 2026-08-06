@@ -188,9 +188,45 @@ def _validate_time_window(
     return lo, hi
 
 
+def _camera_excluded(
+    cam: str,
+    date: str,
+    rules: "list[dict] | None",
+) -> bool:
+    """True if ``(cam, date)`` matches any camera-exclusion *rule*.
+
+    Each rule describes a camera that was physically compromised over a date
+    range and should be dropped *before* the pipeline sees it — e.g. a
+    time-lapse camera nudged out of position by a boulder from a certain date
+    on, whose degraded pose would otherwise poison the bundle adjustment. Keys,
+    all optional::
+
+        {"camera": "C8", "from": "2023-08-01", "until": "2023-09-30"}
+
+    - ``camera`` : camera id (filename prefix). Omitted → applies to every camera.
+    - ``from``   : inclusive start date ``YYYY-MM-DD``. Omitted → unbounded past.
+    - ``until``  : inclusive end date   ``YYYY-MM-DD``. Omitted → unbounded future.
+
+    ISO ``YYYY-MM-DD`` dates order correctly as plain strings, so no parsing is
+    needed. A frame is excluded when it matches the camera *and* falls inside
+    the ``[from, until]`` window of any rule. Site-specific rules live in the
+    site config, not here — the library stays generic.
+    """
+    for r in rules or ():
+        if r.get("camera") not in (None, cam):
+            continue
+        if "from" in r and date < r["from"]:
+            continue
+        if "until" in r and date > r["until"]:
+            continue
+        return True
+    return False
+
+
 def discover_images(
     tlcam_dir: str | Path,
     time_window: tuple[int, int] | None = None,
+    exclude_cameras: list[dict] | None = None,
 ) -> dict[str, dict[str, list[Path]]]:
     """Scan *tlcam_dir* recursively and return ``{date: {camera: [paths]}}``.
 
@@ -214,6 +250,14 @@ def discover_images(
         gate (black night frames never align), so the gate can be tightened
         without falsely skipping otherwise-good days. ``None`` (default) keeps
         every frame — fully backward-compatible.
+    exclude_cameras : list[dict], optional
+        Camera-exclusion rules dropping specific cameras over date ranges before
+        they enter the pipeline (see :func:`_camera_excluded` for the rule
+        shape), e.g. ``[{"camera": "C8", "from": "2023-08-01"}]`` to drop a
+        boulder-displaced camera from August on while keeping its earlier good
+        frames. Applied at discovery, so the excluded frames never reach Step 1,
+        never create a sensor/group, and never inflate the ``max_unaligned``
+        gate. ``None`` (default) keeps every camera — fully backward-compatible.
     """
     tlcam_dir = Path(tlcam_dir)
     lo, hi = _validate_time_window(time_window)
@@ -228,6 +272,8 @@ def discover_images(
             continue
         if lo is not None and not (lo <= int(m.group("time")[:2]) <= hi):
             continue   # outside the daytime window — skip night / motion frame
+        if _camera_excluded(m.group("cam"), m.group("date"), exclude_cameras):
+            continue   # camera physically compromised over this window — drop it
         by_date[m.group("date")][m.group("cam")].append(img)
 
     return {d: dict(cams) for d, cams in sorted(by_date.items())}
@@ -1001,6 +1047,9 @@ def run_multitemporal_ba(
     last_calib_dir = Path(reg_df["calib_dir"].iloc[-1])
     new_calib_xmls: dict = {
         xml.stem: xml for xml in sorted(last_calib_dir.glob("*.xml"))
+        if xml.stem in date_images   # only cameras actually present this day;
+        # a camera excluded at discovery (e.g. C8 from August) gets no floating
+        # new-day sensor and no exported calib XML — nothing dangling downstream.
     }
     if not new_calib_xmls:
         raise FileNotFoundError(

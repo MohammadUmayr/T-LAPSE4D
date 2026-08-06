@@ -67,6 +67,7 @@ def run_4dsfm_day(
     run_validation: bool = True,
     max_unaligned: int = 10,
     time_window: tuple[int, int] | None = None,
+    exclude_cameras: list[dict] | None = None,
 ) -> dict:
     """Run the full 4D SfM pipeline for *new_date*.
 
@@ -133,6 +134,14 @@ def run_4dsfm_day(
         dropped night frames never align, they no longer inflate the Step-1
         4D SfM ``max_unaligned`` gate, so ``max_unaligned`` can be tightened
         without falsely skipping good days. ``None`` (default) keeps every frame.
+    exclude_cameras : list[dict], optional
+        Camera-exclusion rules forwarded to
+        :func:`cntp.metashape.discover_images`, dropping specific cameras over
+        date ranges (e.g. ``[{"camera": "C8", "from": "2023-08-01"}]`` for a
+        boulder-displaced camera) before Step 1. The camera keeps its earlier
+        good frames as reference anchors but contributes no new-day pose, sensor
+        or group. ``None`` (default) keeps every camera. Site-specific rules
+        belong in the site config, not in library code.
 
     Returns
     -------
@@ -155,7 +164,8 @@ def run_4dsfm_day(
     reg_df   = pd.read_csv(registry_csv)
     utm_epsg = _utm_epsg(reg_df["lon"].mean())
 
-    by_date = discover_images(tlcam_dir, time_window=time_window)
+    by_date = discover_images(tlcam_dir, time_window=time_window,
+                              exclude_cameras=exclude_cameras)
     if new_date not in by_date:
         raise ValueError(f"No images found for date {new_date} under {tlcam_dir}")
     date_images = by_date[new_date]
@@ -474,6 +484,7 @@ def run_4dsfm_day_with_rasters(
     run_validation: bool = True,
     max_unaligned: int = 10,
     time_window: tuple[int, int] | None = None,
+    exclude_cameras: list[dict] | None = None,
     # ── Raster knobs ──────────────────────────────────────────────────────
     res: float = 1.0,
     max_gap_pixels: int = 1,
@@ -520,10 +531,12 @@ def run_4dsfm_day_with_rasters(
         See :func:`run_4dsfm_day`.
     match_downscale, depth_downscale, filter_mode, loc_acc_new, rot_acc_new, ref_downsample,
     tba_downsample, p2p_max_disp, sp2p_max_disp, m_sp2p_max_disp, use_ecef,
-    overwrite, verbose, add_to_registry, max_unaligned, time_window :
+    overwrite, verbose, add_to_registry, max_unaligned, time_window, exclude_cameras :
         Forwarded to :func:`run_4dsfm_day`. ``time_window=(start_hour,
         end_hour)`` keeps only daytime frames (drops night / motion-triggered
         captures) so the Step-1 4D SfM ``max_unaligned`` gate can be tightened safely.
+        ``exclude_cameras=[{"camera": "C8", "from": "2023-08-01"}]`` drops a
+        compromised camera over a date range before it reaches Step 1.
     res : float
         Output raster pixel size in metres. Default 1.0.
     max_gap_pixels : int
@@ -608,6 +621,7 @@ def run_4dsfm_day_with_rasters(
         run_validation  = run_validation,
         max_unaligned   = max_unaligned,
         time_window     = time_window,
+        exclude_cameras = exclude_cameras,
     )
 
     # ── Resolve shared paths + CRS ───────────────────────────────────────

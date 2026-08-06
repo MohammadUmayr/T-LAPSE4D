@@ -576,7 +576,7 @@ def plot_m3c2_coreg_and_signal(
 # Relative / absolute accuracy figures — drawing primitives
 # ---------------------------------------------------------------------------
 # Pure drawing helpers for the per-pixel relative-accuracy maps + boxplot and
-# the per-DEM absolute-accuracy boxes. Loaders/orchestrators live in
+# the per-acquisition absolute-accuracy boxes. Loaders/orchestrators live in
 # cntp.postprocessing, which calls these.
 
 _PLOT_STYLE = {
@@ -586,18 +586,24 @@ _PLOT_STYLE = {
 }
 
 
-def _save_or_show(fig, output_dir, filename, save_pdf):
-    """Save PNG (+ PDF when *save_pdf*) to *output_dir*, or show when it is None."""
-    if output_dir is None:
+def _save_or_show(fig, output_dir, filename, save_pdf, show=False):
+    """Save PNG (+ PDF when *save_pdf*) to *output_dir*, and/or display the figure.
+
+    Saves whenever *output_dir* is given; displays when *show* is true (or when
+    there is nowhere to save). The two are independent, so a figure can be both
+    written to disk and rendered inline.
+    """
+    if output_dir is not None:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out / filename, dpi=300, bbox_inches='tight')
+        if save_pdf:
+            fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
+        print(f"  Saved: {out / filename}")
+    if show or output_dir is None:
         plt.show()
-        return
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out / filename, dpi=300, bbox_inches='tight')
-    if save_pdf:
-        fig.savefig(out / f'{Path(filename).stem}.pdf', bbox_inches='tight')
-    plt.close(fig)
-    print(f"  Saved: {out / filename}")
+    else:
+        plt.close(fig)
 
 
 def _robust_vmax(matrix, pct=98.0):
@@ -639,7 +645,7 @@ def _add_scalebar(ax, length_m, *, label=None, color="white", loc="lower right",
         label = f"{length_m/1000:g} km" if length_m >= 1000 else f"{length_m:g} m"
     if thickness_m is None:
         thickness_m = length_m * 0.03
-    bar = AnchoredSizeBar(ax.transData, length_m, label, loc, pad=0.4,
+    bar = AnchoredSizeBar(ax.transData, length_m, label, loc, pad=0.4, sep=5,
                           color=color, frameon=False, size_vertical=thickness_m,
                           fontproperties=fm.FontProperties(size=10))
     ax.add_artist(bar)
@@ -671,15 +677,20 @@ def data_window(arr, extent, *, pad_frac=0.06, q=0.5):
 
 def plot_maps_row(panels, extent, *, window=None, scalebar_m="auto",
                   bad_color="white", panel_size=6.0, output_dir=None,
-                  filename="pixel_maps.png", save_pdf=True):
-    """Draw several ``(H, W)`` rasters side by side on one shared window.
+                  filename="pixel_maps.png", save_pdf=True, show=False):
+    """Draw several rasters side by side on one shared grid + window.
 
-    ``panels`` is a list of dicts, each with ``values`` and optional ``cmap``,
-    ``vmin``, ``vmax``, ``extend``, ``clabel``, ``title``. ``window`` (from
-    :func:`data_window`) sets a common view so the panels align; NaN cells and
-    the canvas use ``bad_color``. Each panel gets its own colourbar + scale bar.
+    ``panels`` is a list of dicts sharing the same *extent* (grid). A single-band
+    panel has ``values`` (H, W) plus optional ``cmap``, ``vmin``, ``vmax``,
+    ``extend``, ``clabel``; an RGB(A) panel sets ``rgb=True`` with ``values``
+    (H, W, 3 or 4) and gets no colourbar (its alpha channel carries any
+    transparency, e.g. an ortho pre-clipped to the data footprint). ``window``
+    (from :func:`data_window`) sets a common view so the panels align; NaN cells /
+    transparent pixels / the canvas use ``bad_color``. Colourbar space is reserved
+    on every panel (hidden on RGB ones) so all panels keep the same width.
     """
     import matplotlib.colors as mcolors
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     view = window if window is not None else extent
     r, g, b = mcolors.to_rgb(bad_color)
@@ -688,27 +699,42 @@ def plot_maps_row(panels, extent, *, window=None, scalebar_m="auto",
     fig, axes = plt.subplots(1, len(panels), squeeze=False,
                              figsize=(panel_size * len(panels), panel_size))
     for ax, p in zip(axes[0], panels):
-        cmap = plt.get_cmap(p.get("cmap", "viridis")).copy()
-        cmap.set_bad(bad_color)
         ax.set_facecolor(bad_color)
-        im = ax.imshow(np.ma.masked_invalid(np.asarray(p["values"], float)),
-                       extent=extent, origin="upper", cmap=cmap,
-                       vmin=p.get("vmin"), vmax=p.get("vmax"))
+        # The colourbar axes is tied to the image axes' *drawn* box, so it tracks
+        # the height aspect='equal' gives it. A plain fig.colorbar(ax=...) sizes
+        # itself to the whole cell, and runs far past a wide, short map.
+        cax = make_axes_locatable(ax).append_axes("right", size="4%", pad=0.08)
+        if p.get("rgb"):
+            ax.imshow(np.asarray(p["values"]), extent=extent, origin="upper")
+            cax.set_axis_off()                # reserve the width, draw nothing
+        else:
+            cmap = plt.get_cmap(p.get("cmap", "viridis")).copy()
+            cmap.set_bad(bad_color)
+            im = ax.imshow(np.ma.masked_invalid(np.asarray(p["values"], float)),
+                           extent=extent, origin="upper", cmap=cmap,
+                           vmin=p.get("vmin"), vmax=p.get("vmax"))
+            fig.colorbar(im, cax=cax, extend=p.get("extend", "neither")).set_label(
+                p.get("clabel", ""))
         ax.set_xlim(view[0], view[1])
         ax.set_ylim(view[2], view[3])
         ax.set_aspect("equal")
+        # aspect='equal' shrinks each axes inside its cell; centre-anchoring then
+        # leaves their tops at different heights, so the titles don't line up.
+        ax.set_anchor("N")
         ax.set_xlabel("Easting (m)")
         if p.get("title"):
-            ax.set_title(p["title"])
-        fig.colorbar(im, ax=ax, extend=p.get("extend", "neither"),
-                     fraction=0.046, pad=0.04).set_label(p.get("clabel", ""))
+            # Matplotlib only raises a title clear of the y-axis offset text
+            # ("1e6") when the two would overlap — so a short title stays low
+            # while a long one gets bumped, and the row's titles end up ragged.
+            # A pad that always clears the offset keeps them on one line.
+            ax.set_title(p["title"], pad=16)
         if scalebar_m:
             length = (_nice_scalebar_len(view[1] - view[0])
                       if scalebar_m == "auto" else scalebar_m)
             _add_scalebar(ax, length, color=sb_color)
     axes[0][0].set_ylabel("Northing (m)")
     plt.tight_layout()
-    _save_or_show(fig, output_dir, filename, save_pdf)
+    _save_or_show(fig, output_dir, filename, save_pdf, show=show)
 
 
 def plot_relative_accuracy_boxplot(sd, nmad, *,
@@ -716,7 +742,7 @@ def plot_relative_accuracy_boxplot(sd, nmad, *,
                                    "M3C2 stack", ylabel="Per-pixel deviation (m)",
                                    ylim=None, output_dir=None,
                                    filename="stable_relative_accuracy.png",
-                                   save_pdf=True):
+                                   save_pdf=True, show=False):
     """Relative-accuracy boxplot of per-corepoint stable SD and NMAD.
 
     Two boxes (SD, NMAD): box = IQR, red median line, whiskers 1.5xIQR, fliers
@@ -757,23 +783,23 @@ def plot_relative_accuracy_boxplot(sd, nmad, *,
         ax.set_title(title)
     plt.tight_layout()
     summary = {"sd": _summary(sd), "nmad": _summary(nmad)}
-    _save_or_show(fig, output_dir, filename, save_pdf)
+    _save_or_show(fig, output_dir, filename, save_pdf, show=show)
     return summary
 
 
-def plot_absolute_accuracy_boxes(records, *, area_is_km2=True, bin_days=14,
+def plot_absolute_accuracy_boxes(records, *, area_is_m2=True, bin_days=14,
                                  site_label=None, cmap="Blues", median_color="red",
                                  ylim=None, width=None, output_dir=None,
                                  filename="stable_absolute_accuracy.png",
-                                 save_pdf=True):
-    """Absolute-accuracy boxes: per-DEM stable residual distributions over time.
+                                 save_pdf=True, show=False):
+    """Absolute-accuracy boxes: per-acquisition stable residuals over time.
 
-    ``records`` is a list of ``{date, area, vals}`` (``vals`` = that DEM's finite
-    stable residuals). One box per record at its real date, coloured by ``area``
-    (``Blues`` + colourbar; km^2 when ``area_is_km2`` else corepoint count). Red
-    median, whiskers 1.5xIQR, fliers hidden, dashed zero line; y auto-fits the
-    whiskers symmetric about 0 unless ``ylim`` is given. ``bin_days`` only sets
-    the cadence word in the title.
+    ``records`` is a list of ``{date, area, vals}`` where ``vals`` are that
+    acquisition's finite stable-terrain M3C2 distances. One box per record at its
+    ``date``, coloured by ``area`` (``Blues`` + colourbar; m^2 when ``area_is_m2``,
+    else valid-corepoint count). Red median, whiskers 1.5xIQR, fliers hidden,
+    dashed zero line; y auto-fits the whiskers symmetric about 0 unless ``ylim``
+    is given. ``bin_days`` only sets the cadence word in the title.
     """
     import matplotlib.dates as mdates
     import matplotlib.colors as mcolors
@@ -781,7 +807,7 @@ def plot_absolute_accuracy_boxes(records, *, area_is_km2=True, bin_days=14,
     from matplotlib.lines import Line2D
 
     areas = np.array([r["area"] for r in records], dtype="float64")
-    norm = mcolors.Normalize(vmin=float(areas.min()), vmax=float(areas.max()))
+    norm = mcolors.Normalize(vmin=0.0, vmax=float(areas.max()))
     cmap_obj = plt.get_cmap(cmap)
     if width is None:
         width = bin_days * 0.6 if bin_days else 5.0
@@ -822,7 +848,7 @@ def plot_absolute_accuracy_boxes(records, *, area_is_km2=True, bin_days=14,
     sm = ScalarMappable(norm=norm, cmap=cmap_obj)
     sm.set_array([])
     cb = fig.colorbar(sm, ax=ax)
-    cb.set_label("Stable surface area (km$^2$)" if area_is_km2
+    cb.set_label("Stable surface area (m$^2$)" if area_is_m2
                  else "Valid stable corepoints")
     plt.tight_layout()
-    _save_or_show(fig, output_dir, filename, save_pdf)
+    _save_or_show(fig, output_dir, filename, save_pdf, show=show)
