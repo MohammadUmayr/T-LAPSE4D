@@ -1,10 +1,11 @@
 # CNTP
 
+[![tests](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/tests.yml/badge.svg)](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/tests.yml)
+[![linting](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/pre-commit.yml)
+[![Coverage Status](https://coveralls.io/repos/github/MohammadUmayr/CNTP_hackathon/badge.svg?branch=main)](https://coveralls.io/github/MohammadUmayr/CNTP_hackathon?branch=main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-321%20passing-brightgreen.svg)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](#tests)
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](.pre-commit-config.yaml)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 
 A library for generating and processing point clouds from the timelapse photogrammetry.
 
@@ -485,8 +486,9 @@ The suite is fully self-contained: every fixture is synthetic and lives in a tem
 it needs **no Metashape licence, no ASP binaries and no real data**. Settings live in
 `pyproject.toml`, so neither command needs arguments.
 
-Coverage is **96% of reachable code** (1504/1567 statements). The raw figure is 62%; the difference
-is code that cannot run without the proprietary or external parts of the stack:
+Coverage is **96% of reachable code** (1499/1563 statements). The badge above reports the raw figure,
+which is lower; the difference is code that cannot run without the proprietary or external parts of
+the stack:
 
 | Module | Reachable coverage | Not reachable in tests |
 |---|---|---|

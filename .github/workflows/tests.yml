@@ -1,0 +1,71 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: ubuntu, conda env
+    runs-on: ubuntu-latest
+
+    # conda needs a login shell so `conda activate` takes effect in every step.
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Start from an empty environment so the cache below can fill it.
+      - name: Initiate empty environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          activate-environment: cntp
+          channel-priority: strict
+
+      - name: Get month for resetting cache
+        run: echo "cache_date=$(date -u '+%Y%m')" >> $GITHUB_ENV
+
+      - name: Cache conda env
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONDA }}/envs
+          key: conda-ubuntu-${{ env.cache_date }}-${{ hashFiles('environment.yml') }}-${{ env.CACHE_NUMBER }}
+        env:
+          CACHE_NUMBER: 0   # bump to force a rebuild when environment.yml has not changed
+        id: cache
+
+      - name: Install environment
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: conda env update -n cntp -f environment.yml
+
+      - name: Install cntp
+        run: pip install -e .
+
+      # The Metashape Python module is proprietary and cannot be installed on a runner. The library
+      # falls back to `Metashape = None`, so this must still succeed. If it ever stops doing so, the
+      # package has grown a hard dependency on a licensed module.
+      - name: Check import works without Metashape
+        run: python -c "import cntp; print(cntp.__file__)"
+
+      - name: Print conda environment (for debugging)
+        run: conda info && conda list
+
+      - name: Test with pytest
+        run: coverage run -m pytest -ra --durations=10
+
+      - name: Convert coverage to lcov
+        run: coverage lcov -o coverage.lcov
+
+      # Requires the repository to be enabled at coveralls.io. Until it is, this step fails
+      # harmlessly and the coverage badge reports "unknown".
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: coverage.lcov
