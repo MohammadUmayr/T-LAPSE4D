@@ -477,7 +477,7 @@ workflow.
 ## Tests
 
 ```bash
-pytest                                    # 321 tests, ~25 s
+pytest
 coverage run -m pytest && coverage report
 ```
 
@@ -505,7 +505,7 @@ against a licensed install and real imagery, not unit tests.
 ### Pre-commit hooks
 
 ```bash
-pre-commit install                        # once; hooks then run on every commit
+pre-commit install    # once; hooks then run on every commit
 ```
 
 Configured in `.pre-commit-config.yaml`: `flake8` (with `bugbear` and `comprehensions`), `isort`,
