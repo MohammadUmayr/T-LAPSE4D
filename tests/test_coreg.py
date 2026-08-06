@@ -5,9 +5,8 @@ Functions to test the point-cloud co-registration tools.
 ``asp.extract_stable_reference`` and ``asp.evaluate_coreg`` call them on every co-registration, and
 ``raster.m3c2_to_raster`` and ``pipeline_4dsfm`` call them too.
 
-The py4dgeo ICP path in this module (``coreg_pc``) has been superseded by ASP ``pc_align`` and has no
-callers outside ``batch.py``, which is itself unused. It is deliberately not covered — testing it would
-lock in code that should be deleted.
+The py4dgeo ICP path that used to live here (``coreg_pc``) has been removed — ASP ``pc_align``
+superseded it, and its only caller went with ``cntp.batch``.
 """
 
 from __future__ import annotations
