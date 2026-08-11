@@ -424,7 +424,7 @@ def plot_m3c2_coreg_and_signal(
     ----------
     ref_stable, dist_before, dist_after :
         Corepoint coords (cols 0/1 = easting/northing) and the before/after M3C2
-        distances on stable terrain (from :func:`cntp.asp.evaluate_coreg`).
+        distances on stable terrain (from :func:`tlapse4d.asp.evaluate_coreg`).
     signal :
         2-D M3C2 signal raster (NaN where no data), e.g. ``<date>_M3C2_raster.tif``.
     signal_extent :
@@ -578,7 +578,7 @@ def plot_m3c2_coreg_and_signal(
 # ---------------------------------------------------------------------------
 # Pure drawing helpers for the per-pixel relative-accuracy maps + boxplot and
 # the per-acquisition absolute-accuracy boxes. Loaders/orchestrators live in
-# cntp.postprocessing, which calls these.
+# tlapse4d.postprocessing, which calls these.
 
 _PLOT_STYLE = {
     'font.family': 'serif', 'font.size': 12, 'axes.titlesize': 13,
@@ -749,7 +749,7 @@ def plot_relative_accuracy_boxplot(sd, nmad, *,
     Two boxes (SD, NMAD): box = IQR, red median line, whiskers 1.5xIQR, fliers
     hidden, black-triangle mean (legend "mean"/"median"). Returns the mean/median
     of each so the printed number and the figure agree. Pass the finite-or-NaN
-    arrays from :func:`cntp.postprocessing.stable_precision_arrays`; NaNs are
+    arrays from :func:`tlapse4d.postprocessing.stable_precision_arrays`; NaNs are
     dropped here.
     """
     from matplotlib.lines import Line2D

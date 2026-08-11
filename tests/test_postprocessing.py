@@ -6,7 +6,7 @@ against hand-computable answers: a stack of constant planes at 1, 2 and 3 m has 
 1.4826 by construction.
 
 Every test touching the cube cache passes an explicit ``cache_dir``. The default is
-``~/.cache/cntp_signalstack``, which a test must never write to.
+``~/.cache/tlapse4d_signalstack``, which a test must never write to.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import pytest
 from conftest import GRID_SHAPE, GRID_TRANSFORM, write_raster
 from rasterio.crs import CRS
 
-from cntp.postprocessing import (
+from tlapse4d.postprocessing import (
     SignalStack,
     _discover_stable_ref,
     _is_iso_date,
@@ -524,7 +524,7 @@ class TestLoadStableGridStack:
         # The reference must have exactly as many points as the distance arrays have corepoints.
         from conftest import make_cloud
 
-        from cntp.io import save_las
+        from tlapse4d.io import save_las
 
         root, _ = pipeline_output_dir
         ref = root / "output" / "_ref_cache" / "ref_0.15_stable.las"
@@ -663,7 +663,7 @@ class TestCoregAndSignalFigure:
         # pair distances with the wrong coordinates.
         from conftest import make_cloud
 
-        from cntp.io import save_las
+        from tlapse4d.io import save_las
 
         root, dates = pipeline_output_dir
         save_las(make_cloud(n=400), root / "output" / "_ref_cache" / "ref_0.30_stable.las")
@@ -676,7 +676,7 @@ class TestCoregAndSignalFigure:
     ) -> None:
         from conftest import make_cloud
 
-        from cntp.io import save_las
+        from tlapse4d.io import save_las
 
         root, dates = pipeline_output_dir
         ref = root / "output" / "_ref_cache" / "ref_0.15_stable.las"

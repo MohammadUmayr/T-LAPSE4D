@@ -3,14 +3,14 @@
 Orchestrates the seven library calls that process one day's images from raw
 JPEGs to a validated, co-registered point cloud + a registry entry:
 
-  1.  Multi-temporal bundle adjustment   :func:`cntp.metashape.run_multitemporal_ba`
-  2.  Single-day fixed-IOP reconstruction :func:`cntp.metashape.run_single_day_fixed_iop`
-  3.  Three-stage ASP ICP coreg          :func:`cntp.asp.pc_align_p2p_sp2p`
-  3b. M3C2 evaluation on coreg cloud     :func:`cntp.asp.evaluate_coreg`
-  4.  Apply transform to camera EOPs     :func:`cntp.asp.apply_coreg_to_cameras_ecef`
-  6.  Rebuild cloud with corrected M      :func:`cntp.metashape.rebuild_coreg_cloud`
+  1.  Multi-temporal bundle adjustment   :func:`tlapse4d.metashape.run_multitemporal_ba`
+  2.  Single-day fixed-IOP reconstruction :func:`tlapse4d.metashape.run_single_day_fixed_iop`
+  3.  Three-stage ASP ICP coreg          :func:`tlapse4d.asp.pc_align_p2p_sp2p`
+  3b. M3C2 evaluation on coreg cloud     :func:`tlapse4d.asp.evaluate_coreg`
+  4.  Apply transform to camera EOPs     :func:`tlapse4d.asp.apply_coreg_to_cameras_ecef`
+  6.  Rebuild cloud with corrected M      :func:`tlapse4d.metashape.rebuild_coreg_cloud`
   6b. M3C2 validation on rebuilt cloud   (inline — py4dgeo + matplotlib)
-  7.  Update reference registry          :func:`cntp.metashape.update_registry`
+  7.  Update reference registry          :func:`tlapse4d.metashape.update_registry`
 
 Each step checks for its key output on disk before running; pass
 ``overwrite=True`` to force a full re-run.
@@ -27,15 +27,15 @@ import pandas as pd
 import py4dgeo
 import rasterio
 
-from cntp.asp import (
+from tlapse4d.asp import (
     apply_coreg_to_cameras_ecef,
     evaluate_coreg,
     extract_stable_reference,
     pc_align_p2p_sp2p,
 )
-from cntp.coreg import extract_stable_terrain, run_m3c2
-from cntp.io import apply_glacier_mask, load_las, save_las
-from cntp.metashape import (
+from tlapse4d.coreg import extract_stable_terrain, run_m3c2
+from tlapse4d.io import apply_glacier_mask, load_las, save_las
+from tlapse4d.metashape import (
     _utm_epsg,
     discover_images,
     rebuild_coreg_cloud,
@@ -43,8 +43,8 @@ from cntp.metashape import (
     run_single_day_fixed_iop,
     update_registry,
 )
-from cntp.plot import plot_dod_histogram
-from cntp.raster import (
+from tlapse4d.plot import plot_dod_histogram
+from tlapse4d.raster import (
     build_dem_and_ortho,
     build_dem_and_ortho_p2d,
     build_dod,
@@ -97,7 +97,7 @@ def run_4dsfm_day(
     glacier_mask : Path
         Glacier polygon shapefile (same CRS as point clouds).
     registry_csv : Path
-        Reference registry CSV managed by :func:`cntp.metashape.update_registry`.
+        Reference registry CSV managed by :func:`tlapse4d.metashape.update_registry`.
         The UTM zone is derived from the mean ``lon`` column.
     output_dir : Path
         Root output directory (parent of ``output/``).
@@ -143,7 +143,7 @@ def run_4dsfm_day(
         skipped, ``validation_med`` / ``validation_nmad`` / ``validation_std`` stay NaN.
     time_window : tuple[int, int], optional
         Inclusive capture-hour window ``(start_hour, end_hour)`` forwarded to
-        :func:`cntp.metashape.discover_images`. Keeps only frames captured in
+        :func:`tlapse4d.metashape.discover_images`. Keeps only frames captured in
         that daytime window (e.g. ``(9, 17)``) and drops off-schedule night /
         motion-triggered captures before they reach Step 1/Step 2. Because the
         dropped night frames never align, they no longer inflate the Step-1
@@ -151,7 +151,7 @@ def run_4dsfm_day(
         without falsely skipping good days. ``None`` (default) keeps every frame.
     exclude_cameras : list[dict], optional
         Camera-exclusion rules forwarded to
-        :func:`cntp.metashape.discover_images`, dropping specific cameras over
+        :func:`tlapse4d.metashape.discover_images`, dropping specific cameras over
         date ranges (e.g. ``[{"camera": "C8", "from": "2023-08-01"}]`` for a
         boulder-displaced camera) before Step 1. The camera keeps its earlier
         good frames as reference anchors but contributes no new-day pose, sensor
@@ -550,7 +550,7 @@ def run_4dsfm_day_with_rasters(
     res : float
         Output raster pixel size in metres. Default 1.0.
     max_gap_pixels : int
-        Forwarded to :func:`cntp.raster.build_dem_and_ortho`.
+        Forwarded to :func:`tlapse4d.raster.build_dem_and_ortho`.
     ref_cloud_downsample : float
         Extra load-time downsample fed to ``griddata`` when building the
         reference DEM. Default 0.25.
@@ -582,7 +582,7 @@ def run_4dsfm_day_with_rasters(
     dict
         ``{"date": str, "sfm": <run_4dsfm_day result>, "dod_stats": dict,
         "stable_stats": dict, "m3c2_stats": dict}``. Each ``*_stats`` dict
-        comes from :func:`cntp.plot.plot_dod_histogram` and contains
+        comes from :func:`tlapse4d.plot.plot_dod_histogram` and contains
         ``median``, ``mean``, ``std``, ``n`` over finite raster pixels.
     """
 

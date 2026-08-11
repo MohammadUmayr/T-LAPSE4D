@@ -2,8 +2,8 @@
 
 Helpers that read products the pipeline already wrote (per-date co-registration
 distances, M3C2 signal rasters, the cached stable reference) and assemble
-derived figures / summaries. This is distinct from :mod:`cntp.pipeline_4dsfm`
-(which *produces* the outputs) and :mod:`cntp.plot` (which *draws*): this module
+derived figures / summaries. This is distinct from :mod:`tlapse4d.pipeline_4dsfm`
+(which *produces* the outputs) and :mod:`tlapse4d.plot` (which *draws*): this module
 *loads from disk and orchestrates*, calling the plot primitives.
 
 Intended for notebook / post-run use over a date or a whole season.
@@ -18,8 +18,8 @@ from typing import Any
 import numpy as np
 import rasterio
 
-from cntp.io import load_las
-from cntp.plot import (
+from tlapse4d.io import load_las
+from tlapse4d.plot import (
     _robust_vmax,
     data_window,
     plot_absolute_accuracy_boxes,
@@ -52,7 +52,7 @@ def coreg_and_signal_figure(
     """Build the before/after-coreg + signal three-panel figure for one date.
 
     Loads the products the pipeline already wrote and calls
-    :func:`cntp.plot.plot_m3c2_coreg_and_signal`:
+    :func:`tlapse4d.plot.plot_m3c2_coreg_and_signal`:
 
     - coreg before/after stable-terrain M3C2 distances from
       ``output/<date>/coreg/<date>_m3c2_distances.npz``;
@@ -184,7 +184,7 @@ def load_signal_stack(
 
     Reading many GeoTIFFs off a slow mount takes minutes, so by default the
     assembled cube is cached to local disk (``cache_dir``, default
-    ``~/.cache/cntp_signalstack``) as ``.npy`` + metadata and memory-mapped back
+    ``~/.cache/tlapse4d_signalstack``) as ``.npy`` + metadata and memory-mapped back
     on later calls; the cache auto-invalidates when the discovered date list
     changes. Pass ``cache=False`` to bypass. Returns a :class:`SignalStack`.
     """
@@ -209,7 +209,7 @@ def load_signal_stack(
     pairs.sort()
     want_dates = [d for d, _ in pairs]
 
-    cdir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "cntp_signalstack"
+    cdir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "tlapse4d_signalstack"
     tag = f"{Path(output_dir).name}__{kind}__{date_from or 'all'}__{date_to or 'all'}"
     cube_path = cdir / f"{tag}.cube.npy"
     meta_path = cdir / f"{tag}.meta.npz"
@@ -548,7 +548,7 @@ def _reference_ortho_panel(
     Reads ``output/_ref_cache/reference_ortho.tif``, resamples it onto the M3C2
     map grid (same CRS), and sets alpha=0 outside the boolean *footprint* mask so
     the ortho shows only the data shape shared with the other panels. Returns a
-    panel dict for :func:`cntp.plot.plot_maps_row`, or None if the ortho is absent.
+    panel dict for :func:`tlapse4d.plot.plot_maps_row`, or None if the ortho is absent.
     """
     ref_ortho = Path(output_dir) / "output" / "_ref_cache" / "reference_ortho.tif"
     if not ref_ortho.exists():

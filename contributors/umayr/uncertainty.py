@@ -34,8 +34,8 @@ Notes on interpretation
   pixels. ``ice_free_area_m2`` in the output is the honest measure of how much
   ground a bin rests on.
 
-Not part of the ``cntp`` package yet — this lives under ``contributors/``
-until the approach settles. It imports nothing from ``cntp``, so promoting it
+Not part of the ``tlapse4d`` package yet — this lives under ``contributors/``
+until the approach settles. It imports nothing from ``tlapse4d``, so promoting it
 later is a plain move.
 
 Typical use
@@ -133,7 +133,7 @@ def coreg_nmad(output_dir: str | Path, date: str) -> float:
 
     Reads the ``after`` row of ``<output>/<date>/coreg/<date>_m3c2_stats.csv``,
     the number the pipeline already reported at Step 3b — the same source
-    ``cntp.postprocessing.load_coreg_nmad`` uses, so the acquisition gate here
+    ``tlapse4d.postprocessing.load_coreg_nmad`` uses, so the acquisition gate here
     matches the one behind the accuracy figures.
     """
     f = Path(output_dir) / date / "coreg" / f"{date}_m3c2_stats.csv"

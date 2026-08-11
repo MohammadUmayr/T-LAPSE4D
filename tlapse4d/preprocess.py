@@ -2,7 +2,7 @@
 
 Camera time-lapse data arrives in a different on-disk mess for every field
 team: nested EK-card subfolders, mixed extensions, timestamps only in EXIF.
-The rest of :mod:`cntp` only ever works with one *standard* filename::
+The rest of :mod:`tlapse4d` only ever works with one *standard* filename::
 
     <camera>_<YYYY-MM-DD>_<HHMMSS>.JPG     e.g.  C7_2023-11-27_083000.JPG
 
@@ -12,7 +12,7 @@ name derived from the photo's EXIF capture time, leaving the originals
 untouched, and writes a manifest CSV recording exactly what mapped to what.
 
 Already have standard-named images? You don't need this at all — point the
-pipeline straight at your folder (see :func:`cntp.metashape.discover_images`).
+pipeline straight at your folder (see :func:`tlapse4d.metashape.discover_images`).
 
 Requires ImageMagick's ``identify`` on PATH for EXIF extraction.
 """
@@ -140,7 +140,7 @@ def homogenize_images(
         raise RuntimeError(
             "ImageMagick's `identify` not found on PATH — needed to read EXIF "
             "timestamps. Install ImageMagick, or supply already-standard-named "
-            "images and skip this step (see cntp.metashape.discover_images)."
+            "images and skip this step (see tlapse4d.metashape.discover_images)."
         )
 
     if n_jobs is None:
@@ -289,7 +289,7 @@ def ensure_standardized(
     Path
         The directory to hand to the pipeline as ``tlcam_dir``.
     """
-    from cntp.metashape import discover_images  # lazy: avoid import cycle
+    from tlapse4d.metashape import discover_images  # lazy: avoid import cycle
 
     image_dir = Path(image_dir)
 

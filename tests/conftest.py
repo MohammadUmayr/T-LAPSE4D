@@ -36,8 +36,8 @@ def isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Point ``Path.home()`` at a throwaway directory for every test.
 
-    Several entry points cache to ``~/.cache/cntp_signalstack`` without exposing a ``cache_dir``
-    argument — :func:`cntp.postprocessing.pixel_relative_accuracy` is one. Without this, running the
+    Several entry points cache to ``~/.cache/tlapse4d_signalstack`` without exposing a ``cache_dir``
+    argument — :func:`tlapse4d.postprocessing.pixel_relative_accuracy` is one. Without this, running the
     suite would read and write the developer's real multi-gigabyte cube cache.
     """
     fake_home = tmp_path / "home"
@@ -64,7 +64,7 @@ def write_dem(tmp_path: Path, crs: CRS) -> Callable[..., Path]:
     Return a factory writing a float32 GeoTIFF: ``write_dem(array, name) -> Path``.
 
     Every DEM defaults to the shared grid, so any two DEMs written by one test are pixel-aligned —
-    which is what :func:`cntp.raster.build_dod` requires of its inputs.
+    which is what :func:`tlapse4d.raster.build_dod` requires of its inputs.
     """
 
     def _write(
@@ -105,11 +105,11 @@ def make_cloud(
     Build an Nx9 point cloud (X, Y, Z, R, G, B, NX, NY, NZ) with controlled geometry and colour.
 
     Normals are synthesised so every point has *exactly* ``slope_deg`` slope under
-    :func:`cntp.coreg.calculate_aspect_slope`. That lets a test place points deliberately either side of a
+    :func:`tlapse4d.coreg.calculate_aspect_slope`. That lets a test place points deliberately either side of a
     slope threshold, rather than drawing a random spread and hoping it lands where the test needs it.
 
     RGB defaults to grey-brown with R > B, giving a negative NDWI, so the cloud survives the water filter
-    in :func:`cntp.coreg.extract_stable_terrain`.
+    in :func:`tlapse4d.coreg.extract_stable_terrain`.
     """
     rng = np.random.default_rng(seed)
     xyz = rng.uniform([0, 0, 0], [20, 20, 10], (n, 3))
@@ -174,7 +174,7 @@ def pipeline_output_dir(tmp_path: Path, crs: CRS) -> tuple[Path, list[str]]:
     Build a complete synthetic pipeline output tree and return ``(root, dates)``.
 
     Mirrors what a finished run leaves on disk, which is what the whole of
-    :mod:`cntp.postprocessing` reads::
+    :mod:`tlapse4d.postprocessing` reads::
 
         output/_ref_cache/ref_0.15_stable.las      cached stable-terrain reference
         output/_ref_cache/reference_ortho.tif      UAV + TLC orthomosaic
@@ -185,7 +185,7 @@ def pipeline_output_dir(tmp_path: Path, crs: CRS) -> tuple[Path, list[str]]:
     The stable reference and the distance arrays share one corepoint count by construction, which
     is the invariant every loader in that module checks before stacking.
     """
-    from cntp.io import save_las
+    from tlapse4d.io import save_las
 
     rng = np.random.default_rng(42)
     dates = ["2024-06-23", "2024-07-07", "2024-07-21"]
@@ -246,9 +246,9 @@ def write_cloud_las(tmp_path: Path) -> Callable[..., Path]:
 
     ``write_cloud_las(name, dz=0.0, n=3000) -> Path``. The surface is a gentle tilted plane so
     cubic interpolation has a well-posed answer, and the EPSG is embedded in the header because
-    :func:`cntp.raster.build_dem_and_ortho` reads the CRS from there when none is passed.
+    :func:`tlapse4d.raster.build_dem_and_ortho` reads the CRS from there when none is passed.
     """
-    from cntp.io import save_las
+    from tlapse4d.io import save_las
 
     x0, y0 = GRID_TRANSFORM.c, GRID_TRANSFORM.f - GRID_SHAPE[0]
 

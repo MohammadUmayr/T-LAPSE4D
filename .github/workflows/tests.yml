@@ -24,7 +24,7 @@ jobs:
         with:
           miniforge-version: latest
           auto-update-conda: true
-          activate-environment: cntp
+          activate-environment: tlapse4d
           channel-priority: strict
 
       - name: Get month for resetting cache
@@ -41,16 +41,16 @@ jobs:
 
       - name: Install environment
         if: steps.cache.outputs.cache-hit != 'true'
-        run: conda env update -n cntp -f environment.yml
+        run: conda env update -n tlapse4d -f environment.yml
 
-      - name: Install cntp
+      - name: Install tlapse4d
         run: pip install -e .
 
       # The Metashape Python module is proprietary and cannot be installed on a runner. The library
       # falls back to `Metashape = None`, so this must still succeed. If it ever stops doing so, the
       # package has grown a hard dependency on a licensed module.
       - name: Check import works without Metashape
-        run: python -c "import cntp; print(cntp.__file__)"
+        run: python -c "import tlapse4d; print(tlapse4d.__file__)"
 
       - name: Print conda environment (for debugging)
         run: conda info && conda list

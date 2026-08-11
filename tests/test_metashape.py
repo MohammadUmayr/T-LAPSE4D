@@ -1,7 +1,7 @@
 """
 Functions to test the Metashape helper tools.
 
-None of these touch the licensed Metashape module: the import in :mod:`cntp.metashape` falls back to
+None of these touch the licensed Metashape module: the import in :mod:`tlapse4d.metashape` falls back to
 ``Metashape = None`` when it is absent, so everything here runs on a bare CI runner. The SfM entry points
 themselves (``run_multitemporal_ba``, ``run_single_day_fixed_iop``, ``bootstrap_registry``) need a licence
 and a real project, and are out of scope.
@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from cntp.metashape import (
+from tlapse4d.metashape import (
     _camera_excluded,
     _camera_prefix,
     _image_date,
@@ -399,7 +399,7 @@ class TestLoadCalibXml:
     """Loading a Metashape XML calibration, and failing clearly when the module is absent."""
 
     def test_load_calib_xml__without_metashape(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        import cntp.metashape as ms
+        import tlapse4d.metashape as ms
 
         # On a machine without the licensed module the import falls back to None; the error must say
         # so rather than raising AttributeError on NoneType.

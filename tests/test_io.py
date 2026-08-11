@@ -17,7 +17,7 @@ import pytest
 from conftest import UTM45N, make_cloud
 from shapely.geometry import Polygon
 
-from cntp.io import apply_glacier_mask, load_las, read_las_bounds, save_las
+from tlapse4d.io import apply_glacier_mask, load_las, read_las_bounds, save_las
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def las_path(tmp_path: Path, cloud: np.ndarray) -> Path:
 
 
 def _write_mask(path: Path, polygons: list[Polygon]) -> Path:
-    """Write *polygons* to a vector file readable by :func:`cntp.io.apply_glacier_mask`."""
+    """Write *polygons* to a vector file readable by :func:`tlapse4d.io.apply_glacier_mask`."""
     gpd.GeoDataFrame(geometry=polygons, crs=f"EPSG:{UTM45N}").to_file(path)
     return path
 

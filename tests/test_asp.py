@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 from conftest import UTM45N
 
-from cntp.asp import (
+from tlapse4d.asp import (
     _apply_transform_to_las,
     _check_asp,
     _read_asp_transform,
@@ -222,7 +222,7 @@ class TestAspAvailability:
     """The guard that turns a missing ASP install into a message rather than a confusing failure."""
 
     def test_check_asp__raises_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import cntp.asp as asp_mod
+        import tlapse4d.asp as asp_mod
 
         monkeypatch.setattr(asp_mod.shutil, "which", lambda _: None)
 
@@ -230,7 +230,7 @@ class TestAspAvailability:
             _check_asp()
 
     def test_check_asp__passes_when_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import cntp.asp as asp_mod
+        import tlapse4d.asp as asp_mod
 
         monkeypatch.setattr(asp_mod.shutil, "which", lambda _: "/opt/asp/bin/pc_align")
 
@@ -293,7 +293,7 @@ class TestLasUtmToEcef:
         src = write_cloud_las("utm.las")
         out = las_utm_to_ecef(src, UTM45N, tmp_path / "ecef.las")
 
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         utm_pts = load_las(src)
         ecef_pts = load_las(out)
@@ -320,7 +320,7 @@ class TestApplyTransformToLas:
     """
 
     def test_apply_transform_to_las__translation(self, tmp_path: Path, write_cloud_las) -> None:
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         src = write_cloud_las("cloud.las")
         T = np.eye(4)
@@ -335,7 +335,7 @@ class TestApplyTransformToLas:
                                    [10.0, -5.0, 2.0], atol=1e-2)
 
     def test_apply_transform_to_las__identity_is_a_no_op(self, tmp_path: Path, write_cloud_las) -> None:
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         src = write_cloud_las("cloud.las")
         out = tmp_path / "same.las"
@@ -347,7 +347,7 @@ class TestApplyTransformToLas:
     def test_apply_transform_to_las__normals_are_rotated_not_scaled(
         self, tmp_path: Path, write_cloud_las
     ) -> None:
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         # A similarity transform carries scale, but normals must stay unit length or every downstream
         # slope calculation shifts.
@@ -364,7 +364,7 @@ class TestApplyTransformToLas:
     def test_apply_transform_to_las__rotation_changes_normal_direction(
         self, tmp_path: Path, write_cloud_las
     ) -> None:
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         src = write_cloud_las("cloud.las")
         # 90 degrees about Z.
@@ -380,7 +380,7 @@ class TestApplyTransformToLas:
         np.testing.assert_allclose(after[:, 7], before[:, 6], atol=1e-5)
 
     def test_apply_transform_to_las__ecef_mode_roundtrips(self, tmp_path: Path, write_cloud_las) -> None:
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         # In ECEF mode the cloud goes UTM -> ECEF -> T -> UTM, so identity must land back where it
         # started; the output stays in UTM so M3C2 and the rasterisers work unchanged.
@@ -472,7 +472,7 @@ class TestExtractStableReference:
     """
 
     def test_extract_stable_reference(self, tmp_path: Path, write_cloud_las) -> None:
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         src = write_cloud_las("ref.las")
 
@@ -483,7 +483,7 @@ class TestExtractStableReference:
         assert len(load_las(out)) > 0
 
     def test_extract_stable_reference__slope_threshold_filters(self, tmp_path: Path, cloud: np.ndarray) -> None:
-        from cntp.io import save_las
+        from tlapse4d.io import save_las
 
         # The shared cloud fixture sits at 75 degrees, so an 80 degree threshold must empty it.
         src = tmp_path / "shallow.las"
@@ -499,7 +499,7 @@ class TestExtractStableReference:
         from conftest import GRID_SHAPE, GRID_TRANSFORM
         from shapely.geometry import box
 
-        from cntp.io import load_las
+        from tlapse4d.io import load_las
 
         src = write_cloud_las("ref.las")
         # Mask the western half of the footprint.

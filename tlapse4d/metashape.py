@@ -4,7 +4,7 @@ Metashape SfM engine for the 4D time-lapse pipeline.
 Thin Python wrappers around the Agisoft Metashape API that drive the
 multi-temporal bundle adjustment, single-day fixed-IOP reconstruction,
 sensor/calibration setup, and post-coregistration camera updates. They are
-orchestrated per date by :mod:`cntp.pipeline_4dsfm` (``run_4dsfm_day``); the
+orchestrated per date by :mod:`tlapse4d.pipeline_4dsfm` (``run_4dsfm_day``); the
 reference registry that feeds them is built by :func:`bootstrap_registry`.
 
 Metashape is an optional runtime dependency, imported lazily inside the
@@ -105,7 +105,7 @@ def _init_native_log(verbose: bool, log_path: "Path | None") -> "Path | None":
 # works (C1..C10, CAM1, EastRidge, …) as long as the id has no underscore.
 # Camera ids are read from the data on disk — never hardcoded — so a new site
 # needs no code change, only its own renamer (or already-standard filenames)
-# producing this pattern. See cntp.preprocess.homogenize_images.
+# producing this pattern. See tlapse4d.preprocess.homogenize_images.
 _IMG_RE = re.compile(
     r"^(?P<cam>[^_]+)_(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{6})\.(?:jpg|jpeg|JPG|JPEG)$"
 )
@@ -240,7 +240,7 @@ def discover_images(
     ----------
     tlcam_dir : str | Path
         Any directory (searched recursively) holding standardised time-lapse
-        images. See :func:`cntp.preprocess.homogenize_images` to produce them.
+        images. See :func:`tlapse4d.preprocess.homogenize_images` to produce them.
     time_window : tuple[int, int], optional
         Inclusive capture-hour window ``(start_hour, end_hour)`` (0–23) used to
         keep only daytime frames, e.g. ``(9, 17)`` keeps every frame captured
@@ -450,7 +450,7 @@ def update_metashape_cameras_after_transform(
     """Apply an ASP pc_align ECEF transform directly to the Metashape chunk transform.
 
     Workflow: single-day reconstruction → ASP pc_align (use_ecef=True) → this
-    function (driven per date by :func:`cntp.pipeline_4dsfm.run_4dsfm_day`).
+    function (driven per date by :func:`tlapse4d.pipeline_4dsfm.run_4dsfm_day`).
 
     Reads the 4×4 rigid-body transform from *transform_path* (Stage 3
     ``run-transform.txt``, which contains the full composed T3∘T2∘T1) and
@@ -840,7 +840,7 @@ def bootstrap_registry(
     if Metashape is None:
         raise ImportError(
             "Metashape Python module is not installed (or AGISOFT_LICENSE_PATH "
-            "was not set before `import cntp`)."
+            "was not set before `import tlapse4d`)."
         )
 
     ref_psx      = Path(ref_psx)

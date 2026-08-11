@@ -6,7 +6,7 @@ Functions to test the point-cloud co-registration tools.
 ``raster.m3c2_to_raster`` and ``pipeline_4dsfm`` call them too.
 
 The py4dgeo ICP path that used to live here (``coreg_pc``) has been removed — ASP ``pc_align``
-superseded it, and its only caller went with ``cntp.batch``.
+superseded it, and its only caller went with ``tlapse4d.batch``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import py4dgeo
 import pytest
 from conftest import make_cloud
 
-from cntp.coreg import (
+from tlapse4d.coreg import (
     _NDWI_A,
     _NDWI_B,
     calculate_aspect_slope,

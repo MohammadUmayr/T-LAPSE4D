@@ -21,7 +21,7 @@ from affine import Affine
 from conftest import GRID_SHAPE, GRID_TRANSFORM, UTM45N
 from rasterio.crs import CRS
 
-from cntp.raster import (
+from tlapse4d.raster import (
     build_dem_and_ortho,
     build_dod,
     build_reference_dem_and_ortho,
@@ -362,7 +362,7 @@ class TestBuildDemAndOrtho:
             assert np.isfinite(src.read(1)).any()
 
     def test_build_dem_and_ortho__no_epsg_anywhere(self, tmp_path: Path, cloud: np.ndarray) -> None:
-        from cntp.io import save_las
+        from tlapse4d.io import save_las
 
         # Without a CRS in the header and none passed, the output would be unreferenced — refuse.
         bare = tmp_path / "bare.las"
@@ -559,7 +559,7 @@ class TestM3c2ToRaster:
         assert out.stat().st_mtime_ns == mtime
 
     def test_m3c2_to_raster__no_epsg_anywhere(self, tmp_path: Path, cloud: np.ndarray) -> None:
-        from cntp.io import save_las
+        from tlapse4d.io import save_las
 
         bare = tmp_path / "bare.las"
         save_las(cloud, bare)

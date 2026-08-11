@@ -30,7 +30,7 @@ repos:
                     '--'
                   ]
                   types_or: [python, markdown]
-                  files: ^(cntp|tests)/
+                  files: ^(tlapse4d|tests)/
 
         # Lint the code using flake8.
         #
@@ -46,7 +46,7 @@ repos:
         # C408 objects to `dict(a=1)` in favour of `{"a": 1}` - a preference, not a defect, and the
         # keyword form reads better for the wide option dicts the plotting code passes around.
         #
-        # cntp/__init__.py imports submodules so `import cntp` exposes the whole namespace; they are
+        # tlapse4d/__init__.py imports submodules so `import tlapse4d` exposes the whole namespace; they are
         # not referenced in the file itself, so F401 is waived there.
         - repo: https://github.com/pycqa/flake8
           rev: 7.3.0
@@ -56,13 +56,13 @@ repos:
                     '--max-line-length', '120',
                     '--select', 'F,B,C,E9',
                     '--extend-ignore', 'C408',
-                    '--per-file-ignores', 'cntp/__init__.py:F401',
+                    '--per-file-ignores', 'tlapse4d/__init__.py:F401',
                     '--'
                   ]
                   additional_dependencies:
                           - flake8-comprehensions
                           - flake8-bugbear
-                  files: ^(cntp|tests)/
+                  files: ^(tlapse4d|tests)/
 
         # Sort imports. Does not touch code bodies, only the import block.
         - repo: https://github.com/PyCQA/isort
@@ -70,10 +70,10 @@ repos:
           hooks:
                 - id: isort
                   args: ["--profile", "black", "--line-length", "120"]
-                  files: ^(cntp|tests)/
+                  files: ^(tlapse4d|tests)/
 
-        # Type-check the test suite. cntp/ is 86% annotated but not complete, so mypy is scoped to
-        # tests/ for now — widen `files` to ^(cntp|tests)/ once plot.py carries annotations too.
+        # Type-check the test suite. tlapse4d/ is 86% annotated but not complete, so mypy is scoped to
+        # tests/ for now — widen `files` to ^(tlapse4d|tests)/ once plot.py carries annotations too.
         - repo: https://github.com/pre-commit/mirrors-mypy
           rev: v1.19.1
           hooks:

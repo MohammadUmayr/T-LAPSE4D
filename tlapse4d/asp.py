@@ -37,9 +37,9 @@ import pandas as pd
 import py4dgeo
 from pyproj import Transformer
 
-from cntp.coreg import _NDWI_A, _NDWI_B, extract_stable_terrain, run_m3c2
-from cntp.io import apply_glacier_mask, load_las, read_las_bounds, save_las
-from cntp.plot import plot_m3c2_distances, plot_m3c2_spatial, plot_stable_terrain_diagnostics
+from tlapse4d.coreg import _NDWI_A, _NDWI_B, extract_stable_terrain, run_m3c2
+from tlapse4d.io import apply_glacier_mask, load_las, read_las_bounds, save_las
+from tlapse4d.plot import plot_m3c2_distances, plot_m3c2_spatial, plot_stable_terrain_diagnostics
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -215,7 +215,7 @@ def apply_coreg_to_cameras(
     return out
 
 
-from cntp.metashape import update_metashape_cameras_after_transform  # noqa: F401
+from tlapse4d.metashape import update_metashape_cameras_after_transform  # noqa: F401
 
 
 def las_utm_to_ecef(
@@ -498,10 +498,10 @@ def extract_stable_reference(
     from the reference DEM before the final ICP pass:
 
     * **Glacier removal** (HSfM: ``dem_mask.py --glaciers`` using RGI polygons)
-      → applied here via :func:`cntp.io.apply_glacier_mask` when a shapefile
+      → applied here via :func:`tlapse4d.io.apply_glacier_mask` when a shapefile
       is provided.
     * **Slope + NDWI filter** (HSfM: ``dem_mask.py --nlcd`` for forest/water)
-      → applied here via :func:`cntp.coreg.extract_stable_terrain`.
+      → applied here via :func:`tlapse4d.coreg.extract_stable_terrain`.
 
     Parameters
     ----------
@@ -979,7 +979,7 @@ def point2dem(
     (point2dem's default ``weighted_average`` filter — what the HSfM workflow
     calls "IDW"), written straight to a GeoTIFF. Not used by the 4D-SfM pipeline
     (which rasterises
-    via :func:`cntp.raster.build_dem_and_ortho`), but kept here as a faster,
+    via :func:`tlapse4d.raster.build_dem_and_ortho`), but kept here as a faster,
     lower-memory alternative for ad-hoc DEM generation.
 
     Parameters
@@ -999,7 +999,7 @@ def point2dem(
         Maps to ASP ``--search-radius-factor``: pixels farther than
         ``max_gap_pixels * res`` from any cloud point produce nodata.
         Default 1 (same convention as
-        :func:`cntp.raster.build_dem_and_ortho`).
+        :func:`tlapse4d.raster.build_dem_and_ortho`).
     nodata : float
         ASP ``--nodata-value``. Default -9999.
     ref_las : str | Path, optional
@@ -1007,7 +1007,7 @@ def point2dem(
         (read from header — no points loaded) via ASP
         ``--t_projwin xmin ymin xmax ymax`` (ASP convention — lower-left +
         upper-right, NOT GDAL's upper-left/lower-right). Mirrors
-        :func:`cntp.raster.build_dem_and_ortho`'s ``ref_las`` argument so the
+        :func:`tlapse4d.raster.build_dem_and_ortho`'s ``ref_las`` argument so the
         ASP DEM lands on the same footprint as the scipy DEM and the two can
         be differenced without resampling. Default ``None`` ⇒ ASP derives the
         grid from the input cloud's own bounding box.

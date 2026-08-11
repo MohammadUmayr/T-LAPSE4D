@@ -1,8 +1,8 @@
-# CNTP
+# T-LAPSE4D
 
-[![tests](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/tests.yml/badge.svg)](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/tests.yml)
-[![linting](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/MohammadUmayr/CNTP_hackathon/actions/workflows/pre-commit.yml)
-[![Coverage Status](https://coveralls.io/repos/github/MohammadUmayr/CNTP_hackathon/badge.svg?branch=main)](https://coveralls.io/github/MohammadUmayr/CNTP_hackathon?branch=main)
+[![tests](https://github.com/MohammadUmayr/T-LAPSE4D/actions/workflows/tests.yml/badge.svg)](https://github.com/MohammadUmayr/T-LAPSE4D/actions/workflows/tests.yml)
+[![linting](https://github.com/MohammadUmayr/T-LAPSE4D/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/MohammadUmayr/T-LAPSE4D/actions/workflows/pre-commit.yml)
+[![Coverage Status](https://coveralls.io/repos/github/MohammadUmayr/T-LAPSE4D/badge.svg?branch=main)](https://coveralls.io/github/MohammadUmayr/T-LAPSE4D?branch=main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
@@ -10,7 +10,7 @@
 A library for generating and processing point clouds from the timelapse photogrammetry.
 
 It turns fixed time-lapse photographs of a glacier into **co-registered 3-D point
-clouds, DEMs, orthoimages, and surface-change maps**, one date at a time. `cntp`
+clouds, DEMs, orthoimages, and surface-change maps**, one date at a time. `tlapse4d`
 wraps [Agisoft Metashape](https://www.agisoft.com/) and the
 [NASA Ames Stereo Pipeline](https://stereopipeline.readthedocs.io/) behind a small
 set of plain Python functions, so an entire multi-temporal (4D Structure-from-Motion)
@@ -45,7 +45,7 @@ monitoring workflow can be driven from a Jupyter notebook by passing paths as va
 
 ## What it does
 
-![CNTP workflow — from raw time-lapse photos to per-date point clouds, DEMs, orthoimages, DoD and M3C2 change maps](docs/workflow.png)
+![T-LAPSE4D workflow — from raw time-lapse photos to per-date point clouds, DEMs, orthoimages, DoD and M3C2 change maps](docs/workflow.png)
 
 The camera identity is read from the **filename** (`<camera>_<date>_<time>`), so the
 on-disk folder layout is irrelevant and there is no hardcoded camera list — a new
@@ -84,7 +84,7 @@ ChangriWest_renamed/              ← point tlcam_dir here
 
 ## Workflow
 
-![CNTP pipeline — inputs, one-time setup, the seven-step per-date pipeline, and the per-date outputs, with the 4D-SfM feedback loop](docs/workflow_diagram.png)
+![T-LAPSE4D pipeline — inputs, one-time setup, the seven-step per-date pipeline, and the per-date outputs, with the 4D-SfM feedback loop](docs/workflow_diagram.png)
 
 The library turns **fixed time-lapse photos of a glacier into co-registered 3-D
 point clouds, DEMs, and surface-change maps**. The diagram above reads
@@ -127,7 +127,7 @@ Two external engines do the heavy lifting: **Agisoft Metashape**
 
 ### Platform support
 
-The `cntp` Python code is OS-independent, but the pipeline shells out to two external
+The `tlapse4d` Python code is OS-independent, but the pipeline shells out to two external
 tools, and one of them sets the platform:
 
 | Platform | Status | Notes |
@@ -141,10 +141,10 @@ itself *does* offer a native Windows wheel, but ASP does not — which is why th
 steps below reference the Linux wheel.
 
 ```bash
-git clone --branch v0.1.0 git@github.com:MohammadUmayr/CNTP_hackathon.git
-cd ./CNTP_hackathon
+git clone --branch v0.1.0 git@github.com:MohammadUmayr/T-LAPSE4D.git
+cd ./T-LAPSE4D
 conda env create -f environment.yml
-conda activate cntp
+conda activate tlapse4d
 pip install -e .
 ```
 
@@ -152,7 +152,7 @@ pip install -e .
 
 | Tool | Used for | How to get it |
 |---|---|---|
-| **Agisoft Metashape** Python 3 module — **v2.3.1** | Bundle adjustment & reconstruction | Proprietary — download the wheel matching your platform (e.g. `metashape-2.3.1-…-linux_x86_64.whl`; Windows/macOS wheels also exist) from agisoft.com and `pip install` it. Set `AGISOFT_LICENSE_PATH` **before** `import cntp`. **[Full steps below](#installing-the-metashape-python-module).** |
+| **Agisoft Metashape** Python 3 module — **v2.3.1** | Bundle adjustment & reconstruction | Proprietary — download the wheel matching your platform (e.g. `metashape-2.3.1-…-linux_x86_64.whl`; Windows/macOS wheels also exist) from agisoft.com and `pip install` it. Set `AGISOFT_LICENSE_PATH` **before** `import tlapse4d`. **[Full steps below](#installing-the-metashape-python-module).** |
 | **NASA Ames Stereo Pipeline** (`pc_align`, `point2dem`) | Point-cloud co-registration + DEM rasterisation | **Linux/macOS only** (no Windows build; use WSL2). Must be on `PATH`. **[Full steps below](#installing-nasa-ames-stereo-pipeline-asp).** |
 | **ImageMagick** (`identify`) | Reading EXIF capture time in `homogenize_images` | Included in `environment.yml` (conda-forge). |
 
@@ -167,9 +167,9 @@ Metashape is proprietary, so it is **not** installed by `conda env create` or
    wheel** (see [Platform support](#platform-support)); the file can live on a
    Windows drive and is reachable in WSL as `/mnt/<letter>/…`.
 
-2. **Install it into the activated `cntp` env**, pointing pip at the file's path:
+2. **Install it into the activated `tlapse4d` env**, pointing pip at the file's path:
    ```bash
-   conda activate cntp
+   conda activate tlapse4d
    pip install /path/to/metashape-2.3.1-…-linux_x86_64.whl
    ```
    > The wheel is tagged `…-abi3` (Python "stable ABI"), so a wheel built for
@@ -177,7 +177,7 @@ Metashape is proprietary, so it is **not** installed by `conda env create` or
    > 3.14 — the version in the filename does not have to match yours exactly.
 
 3. **Point it at your license** by setting `AGISOFT_LICENSE_PATH` **before** the
-   first `import Metashape` / `import cntp`. In a notebook:
+   first `import Metashape` / `import tlapse4d`. In a notebook:
    ```python
    import os
    os.environ["AGISOFT_LICENSE_PATH"] = "/path/to/license.lic"
@@ -213,7 +213,7 @@ ASP provides the `pc_align` and `point2dem` tools the pipeline calls.
    ```
    *(macOS: use `~/.zshrc`. Tarball install: point at the tarball's `bin/`.)*
 
-3. **Verify** (with the `cntp` env active):
+3. **Verify** (with the `tlapse4d` env active):
    ```bash
    which pc_align point2dem      # both resolve to the ASP bin/
    pc_align --version            # NASA Ames Stereo Pipeline 3.x
@@ -267,8 +267,8 @@ import site_config as site
 ### 1. One-time setup per glacier — `setup_new_glacier.ipynb`
 
 ```python
-from cntp.preprocess import ensure_standardized
-from cntp.metashape  import bootstrap_registry
+from tlapse4d.preprocess import ensure_standardized
+from tlapse4d.metashape  import bootstrap_registry
 
 # (a) standardise raw images (copies, originals untouched; EXIF time → filename)
 tlcam_dir = ensure_standardized("/data/SITE/raw")        # → /data/SITE/raw_renamed
@@ -299,7 +299,7 @@ bootstrap_registry(
 ### 2. Process a date
 
 ```python
-from cntp.pipeline_4dsfm import run_4dsfm_day_with_rasters
+from tlapse4d.pipeline_4dsfm import run_4dsfm_day_with_rasters
 
 result = run_4dsfm_day_with_rasters(
     new_date     = "2023-12-15",
@@ -450,14 +450,14 @@ tunable flags below (defaults shown — most runs only set the required argument
 
 | Module | Responsibility |
 |---|---|
-| `cntp.preprocess` | Raw → standardised image filenames (`homogenize_images`, `ensure_standardized`). |
-| `cntp.metashape` | Metashape SfM engine: multi-temporal bundle adjustment, single-day reconstruction, sensor/calibration setup, and the reference registry (`bootstrap_registry`, `update_registry`). |
-| `cntp.asp` | NASA Ames Stereo Pipeline wrappers — `pc_align` ICP co-registration (incl. ECEF). |
-| `cntp.coreg` | py4dgeo point-cloud helpers — M3C2 distances, stable-terrain extraction. |
-| `cntp.io` | LAS/LAZ point-cloud I/O + glacier masking. |
-| `cntp.raster` | DEM / orthoimage / DoD / M3C2 → GeoTIFF rasterisation. |
-| `cntp.plot` | Diagnostic plots + histograms. |
-| `cntp.pipeline_4dsfm` | Per-date orchestration — `run_4dsfm_day`, `run_4dsfm_day_with_rasters`. |
+| `tlapse4d.preprocess` | Raw → standardised image filenames (`homogenize_images`, `ensure_standardized`). |
+| `tlapse4d.metashape` | Metashape SfM engine: multi-temporal bundle adjustment, single-day reconstruction, sensor/calibration setup, and the reference registry (`bootstrap_registry`, `update_registry`). |
+| `tlapse4d.asp` | NASA Ames Stereo Pipeline wrappers — `pc_align` ICP co-registration (incl. ECEF). |
+| `tlapse4d.coreg` | py4dgeo point-cloud helpers — M3C2 distances, stable-terrain extraction. |
+| `tlapse4d.io` | LAS/LAZ point-cloud I/O + glacier masking. |
+| `tlapse4d.raster` | DEM / orthoimage / DoD / M3C2 → GeoTIFF rasterisation. |
+| `tlapse4d.plot` | Diagnostic plots + histograms. |
+| `tlapse4d.pipeline_4dsfm` | Per-date orchestration — `run_4dsfm_day`, `run_4dsfm_day_with_rasters`. |
 
 ## Notebooks
 
@@ -492,14 +492,14 @@ the stack:
 
 | Module | Reachable coverage | Not reachable in tests |
 |---|---|---|
-| `cntp.io`, `cntp.coreg` | 100% | — |
-| `cntp.metashape` | 98% | SfM entry points need a licensed Metashape project |
-| `cntp.preprocess` | 97% | — |
-| `cntp.asp` | 96% | `pc_align` needs ASP binaries |
-| `cntp.postprocessing` | 96% | — |
-| `cntp.plot` | 95% | — |
-| `cntp.raster` | 95% | `build_dem_and_ortho_p2d` shells out to ASP `point2dem` |
-| `cntp.pipeline_4dsfm` | 0% | end-to-end orchestration; needs both |
+| `tlapse4d.io`, `tlapse4d.coreg` | 100% | — |
+| `tlapse4d.metashape` | 98% | SfM entry points need a licensed Metashape project |
+| `tlapse4d.preprocess` | 97% | — |
+| `tlapse4d.asp` | 96% | `pc_align` needs ASP binaries |
+| `tlapse4d.postprocessing` | 96% | — |
+| `tlapse4d.plot` | 95% | — |
+| `tlapse4d.raster` | 95% | `build_dem_and_ortho_p2d` shells out to ASP `point2dem` |
+| `tlapse4d.pipeline_4dsfm` | 0% | end-to-end orchestration; needs both |
 
 There is one test module per source module. Reaching the remaining code would take integration tests
 against a licensed install and real imagery, not unit tests.

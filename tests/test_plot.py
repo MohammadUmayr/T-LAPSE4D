@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from conftest import GRID_SHAPE, GRID_TRANSFORM, make_cloud
 
-from cntp.plot import (
+from tlapse4d.plot import (
     _nice_scalebar_len,
     _plot_if_missing,
     _robust_vmax,
@@ -213,7 +213,7 @@ class TestStableTerrainPlots:
         assert (tmp_path / "stable_terrain_rgb.png").exists()
 
     def test_plot_ndwi_vs_intensity(self, tmp_path: Path) -> None:
-        from cntp.coreg import _NDWI_A, _NDWI_B
+        from tlapse4d.coreg import _NDWI_A, _NDWI_B
 
         cloud = make_cloud(n=200)
         grayscale = np.mean(cloud[:, 3:6], axis=1)
@@ -224,7 +224,7 @@ class TestStableTerrainPlots:
         assert (tmp_path / "ndwi_vs_intensity.png").exists()
 
     def test_plot_stable_terrain_diagnostics__writes_both_figures(self, tmp_path: Path) -> None:
-        from cntp.coreg import _NDWI_A, _NDWI_B, extract_stable_terrain
+        from tlapse4d.coreg import _NDWI_A, _NDWI_B, extract_stable_terrain
 
         cloud = make_cloud(n=300)
         stable_slope, stable = extract_stable_terrain(cloud)

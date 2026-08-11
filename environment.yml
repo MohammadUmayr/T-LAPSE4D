@@ -1,4 +1,4 @@
-name: cntp
+name: tlapse4d
 channels:
   - conda-forge
   - defaults
@@ -29,7 +29,7 @@ dependencies:
   # object file"). Not pulled in by any other dependency.
   - libglu
 
-  # `identify` CLI for EXIF capture-time read in cntp.preprocess.homogenize_images
+  # `identify` CLI for EXIF capture-time read in tlapse4d.preprocess.homogenize_images
   - imagemagick
 
   - pip

@@ -10,8 +10,8 @@ Everything that produces or consumes a 2-D georeferenced raster lives here:
 - Raster stable terrain : :func:`extract_stable_terrain_from_dem`
 - M3C2 → raster         : :func:`m3c2_to_raster`
 
-Point-cloud I/O (LAS/LAZ) stays in :mod:`cntp.io`. Point-cloud coreg + M3C2
-distance computation stays in :mod:`cntp.coreg`. ASP ``point2dem`` wrapper
+Point-cloud I/O (LAS/LAZ) stays in :mod:`tlapse4d.io`. Point-cloud coreg + M3C2
+distance computation stays in :mod:`tlapse4d.coreg`. ASP ``point2dem`` wrapper
 lives in ``contributors/umayr/tools.py``.
 """
 
@@ -29,8 +29,8 @@ from rasterio.errors import RasterioIOError
 from scipy.interpolate import griddata
 from scipy.spatial import cKDTree
 
-from cntp.coreg import _NDWI_A, _NDWI_B, run_m3c2
-from cntp.io import load_las, read_las_bounds
+from tlapse4d.coreg import _NDWI_A, _NDWI_B, run_m3c2
+from tlapse4d.io import load_las, read_las_bounds
 
 # ---------------------------------------------------------------------------
 # GeoTIFF I/O
@@ -182,7 +182,7 @@ def build_dem_and_ortho(
     ----------
     cloud_las : str | Path
         Co-registered LAS/LAZ — typically ``aligned_las`` from Step 3 of
-        :func:`cntp.pipeline_4dsfm.run_4dsfm_day`.
+        :func:`tlapse4d.pipeline_4dsfm.run_4dsfm_day`.
     ref_las : str | Path
         Original (non-downsampled) reference cloud. Only its header bbox is
         read — no points are loaded.
@@ -329,7 +329,7 @@ def build_dem_and_ortho_p2d(
 
     Parameters / returns mirror :func:`build_dem_and_ortho`.
     """
-    from cntp.asp import point2dem  # local import — avoids any import cycle
+    from tlapse4d.asp import point2dem  # local import — avoids any import cycle
 
     cloud_las = Path(cloud_las)
     ref_las   = Path(ref_las)
@@ -540,7 +540,7 @@ def extract_stable_terrain_from_dem(
     out_path: str | Path | None = None,
     overwrite: bool = False,
 ) -> Path:
-    """Raster analogue of ``cntp.coreg.extract_stable_terrain`` + glacier mask.
+    """Raster analogue of ``tlapse4d.coreg.extract_stable_terrain`` + glacier mask.
 
     Combines three filters at the DEM's pixel grid and keeps only pixels that
     pass all three:
@@ -551,7 +551,7 @@ def extract_stable_terrain_from_dem(
     2. **NDWI + intensity filter** — uses the matching ``_ortho.tif`` (same
        grid). NDWI = ``(B - R) / (R + B)``; intensity = ``mean(RGB)``. A pixel
        passes if ``intensity - (NDWI*_NDWI_A + _NDWI_B) < 0`` — same line as
-       :func:`cntp.coreg.extract_stable_terrain` (drops water + snow surfaces).
+       :func:`tlapse4d.coreg.extract_stable_terrain` (drops water + snow surfaces).
     3. **Glacier polygon mask** — pixels inside the glacier polygon are
        excluded.
 
@@ -708,7 +708,7 @@ def m3c2_to_raster(
     Workflow:
 
     1. Load *ref_las* and *day_las* (optionally downsample).
-    2. Build py4dgeo epochs and run :func:`cntp.coreg.run_m3c2`.
+    2. Build py4dgeo epochs and run :func:`tlapse4d.coreg.run_m3c2`.
     3. Each corepoint (= reference cloud point) gets one M3C2 distance.
     4. Bin the corepoint XY positions into a 1 m grid anchored to
        *grid_anchor_las*'s XY bbox (or *ref_las*'s bbox if not given).
@@ -735,7 +735,7 @@ def m3c2_to_raster(
         EPSG code for the output CRS. When ``None``, read from *ref_las*'s
         LAS header.
     normal_radii, cyl_radius, max_distance : float
-        py4dgeo M3C2 parameters. Defaults match :func:`cntp.coreg.run_m3c2`
+        py4dgeo M3C2 parameters. Defaults match :func:`tlapse4d.coreg.run_m3c2`
         — the same values used by every other M3C2 call in the project
         (Step 3b evaluate_coreg, Step 6b validation).
     ref_downsample, day_downsample : float
@@ -850,7 +850,7 @@ def stable_m3c2_raster(
 
     Companion to :func:`m3c2_to_raster`, but for an already-computed distance
     array (e.g. the after-co-registration residual from
-    :func:`cntp.asp.evaluate_coreg`) — so **no M3C2 is recomputed**. Each pixel
+    :func:`tlapse4d.asp.evaluate_coreg`) — so **no M3C2 is recomputed**. Each pixel
     is the **median** distance of the corepoints that fall in it; empty cells
     are NaN. Use it to map co-registration **uncertainty over stable terrain**
     and stack the per-date rasters across a season.

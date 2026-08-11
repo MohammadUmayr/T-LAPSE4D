@@ -1,7 +1,7 @@
-"""Scratch space for new functions before they're promoted into cntp/.
+"""Scratch space for new functions before they're promoted into tlapse4d/.
 
 Prototype here, verify in the notebook, then migrate into the matching
-cntp module (io / coreg / asp / metashape / plot / pipeline_4dsfm / raster).
+tlapse4d module (io / coreg / asp / metashape / plot / pipeline_4dsfm / raster).
 
 Current prototypes
 ------------------
@@ -9,7 +9,7 @@ Current prototypes
   (registry EOP/IOP, fixed-IOP reconstruction, coregistered to the fused
   reference) → ``_ref_cache/reference_TLC_coreg.las``.
 - ``run_4dsfm_day_with_rasters_tlc`` — per-date orchestrator identical to
-  ``cntp.pipeline_4dsfm.run_4dsfm_day_with_rasters`` for SfM + coreg, but the
+  ``tlapse4d.pipeline_4dsfm.run_4dsfm_day_with_rasters`` for SfM + coreg, but the
   DoD / stable-DoD / M3C2 rasters are built against the TLC reference so the
   change signal is TLC-vs-TLC (UAV↔TLC instrument bias cancels as common mode).
 - ``plot_m3c2_spatial``              — 2-panel spatial QC map of M3C2 residuals
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import cntp  # noqa: F401
+import tlapse4d  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ def build_reference_tlc_cloud(
         from the registry, which must contain exactly one date.
     match_downscale, depth_downscale, ref_downsample, tba_downsample,
     p2p_max_disp, sp2p_max_disp, m_sp2p_max_disp, use_ecef, overwrite, verbose :
-        Same meaning as in :func:`cntp.pipeline_4dsfm.run_4dsfm_day`.
+        Same meaning as in :func:`tlapse4d.pipeline_4dsfm.run_4dsfm_day`.
 
     Returns
     -------
@@ -93,11 +93,11 @@ def build_reference_tlc_cloud(
         ``<output_dir>/output/_ref_cache/reference_TLC_coreg.las`` — the
         coregistered TLC reference, ready to pass as ``change_ref_cloud``.
     """
-    from cntp.metashape import (
+    from tlapse4d.metashape import (
         discover_images, run_single_day_fixed_iop, _utm_epsg, _normalize_date,
     )
-    from cntp.asp import extract_stable_reference, pc_align_p2p_sp2p, evaluate_coreg
-    from cntp.io import load_las, save_las
+    from tlapse4d.asp import extract_stable_reference, pc_align_p2p_sp2p, evaluate_coreg
+    from tlapse4d.io import load_las, save_las
 
     output_dir   = Path(output_dir)
     ref_cloud    = Path(ref_cloud)
@@ -235,7 +235,7 @@ def build_reference_tlc_cloud(
 
 
 # ---------------------------------------------------------------------------
-# Part 1b — multi-threaded DEM + ortho (same algorithm as cntp.raster, tiled)
+# Part 1b — multi-threaded DEM + ortho (same algorithm as tlapse4d.raster, tiled)
 # ---------------------------------------------------------------------------
 
 def _interp_tile(payload):
@@ -243,7 +243,7 @@ def _interp_tile(payload):
 
     Runs in a separate process (griddata cubic is single-threaded, so we get
     parallelism by giving each process its own tile). Identical interpolation
-    to ``cntp.raster.interpolate_and_mask`` — just on a sub-grid.
+    to ``tlapse4d.raster.interpolate_and_mask`` — just on a sub-grid.
     """
     import numpy as np
     from scipy.interpolate import griddata
@@ -267,7 +267,7 @@ def build_dem_and_ortho_mt(
     n_tiles: tuple = None,
     margin: float = None,
 ) -> tuple:
-    """Drop-in multi-threaded replacement for ``cntp.raster.build_dem_and_ortho``.
+    """Drop-in multi-threaded replacement for ``tlapse4d.raster.build_dem_and_ortho``.
 
     Same output (cubic-griddata DEM + nearest-neighbour ortho on the reference
     grid), but the work is spread across cores:
@@ -291,8 +291,8 @@ def build_dem_and_ortho_mt(
     import rasterio
     from concurrent.futures import ProcessPoolExecutor
     from scipy.spatial import cKDTree
-    from cntp.io import load_las, read_las_bounds
-    from cntp.raster import save_dem
+    from tlapse4d.io import load_las, read_las_bounds
+    from tlapse4d.raster import save_dem
 
     cloud_las, ref_las, out_dir = Path(cloud_las), Path(ref_las), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -362,7 +362,7 @@ def build_dem_and_ortho_mt(
         for (r0, r1, c0, c1), block in zip(slots, ex.map(_interp_tile, tasks)):
             zi[r0:r1, c0:c1] = block
 
-    # Same global overshoot clip as cntp.raster.interpolate_and_mask
+    # Same global overshoot clip as tlapse4d.raster.interpolate_and_mask
     zi = np.clip(zi, np.nanmin(z), np.nanmax(z))
 
     # Gap mask — one shared tree, parallel query
@@ -394,12 +394,12 @@ def build_dem_and_ortho_mt(
 
 
 # ---------------------------------------------------------------------------
-# Part 1c — DEM via ASP point2dem (HSfM method) — PROMOTED to cntp.raster
+# Part 1c — DEM via ASP point2dem (HSfM method) — PROMOTED to tlapse4d.raster
 # ---------------------------------------------------------------------------
-# build_dem_and_ortho_p2d now lives in cntp.raster and is wired into
+# build_dem_and_ortho_p2d now lives in tlapse4d.raster and is wired into
 # run_4dsfm_day_with_rasters via dem_method="point2dem". Re-exported here so
 # notebook cells importing it from `tools` keep working against one source.
-from cntp.raster import build_dem_and_ortho_p2d  # noqa: F401
+from tlapse4d.raster import build_dem_and_ortho_p2d  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +444,7 @@ def run_4dsfm_day_with_rasters_tlc(
 ) -> dict:
     """Per-date 4D SfM + change-detection rasters against the TLC reference.
 
-    Identical to :func:`cntp.pipeline_4dsfm.run_4dsfm_day_with_rasters` for the
+    Identical to :func:`tlapse4d.pipeline_4dsfm.run_4dsfm_day_with_rasters` for the
     SfM + coregistration half (Steps 1–7, coreg target = fused ``ref_cloud``).
     The raster half is repointed at ``change_ref_cloud`` (the coregistered
     TLC-only reference from :func:`build_reference_tlc_cloud`): the reference
@@ -454,15 +454,15 @@ def run_4dsfm_day_with_rasters_tlc(
     """
     import laspy
     import rasterio
-    from cntp.pipeline_4dsfm import run_4dsfm_day
-    from cntp.raster import (
+    from tlapse4d.pipeline_4dsfm import run_4dsfm_day
+    from tlapse4d.raster import (
         build_reference_dem_and_ortho,
         build_dem_and_ortho,
         build_dod,
         extract_stable_terrain_from_dem,
         m3c2_to_raster,
     )
-    from cntp.plot import plot_dod_histogram
+    from tlapse4d.plot import plot_dod_histogram
 
     output_dir       = Path(output_dir)
     ref_cloud        = Path(ref_cloud)
@@ -629,14 +629,14 @@ def run_4dsfm_day_with_rasters_tlc(
 # the M3C2 raster directly (it already IS reference→day dh, so no DEM
 # differencing). Box-mean sampling is intentionally omitted — that was for his
 # mass-balance point series, not the profiles. Prototype here; promote the
-# plot fns to cntp.plot and the loaders/orchestrator to cntp.postprocessing
+# plot fns to tlapse4d.plot and the loaders/orchestrator to tlapse4d.postprocessing
 # once validated.
 
-# -- Signal stack -- PROMOTED to cntp.postprocessing ------------------------
-# SignalStack + load_signal_stack now live in cntp.postprocessing (its role is
+# -- Signal stack -- PROMOTED to tlapse4d.postprocessing ------------------------
+# SignalStack + load_signal_stack now live in tlapse4d.postprocessing (its role is
 # loading finished outputs from disk). Re-exported here so the Part-3 profile
 # helpers below and notebook cells importing them from `tools` keep working.
-from cntp.postprocessing import (  # noqa: F401
+from tlapse4d.postprocessing import (  # noqa: F401
     SignalStack, load_signal_stack,
 )
 
@@ -899,7 +899,7 @@ def nmad_gate(nmad, max_nmad=0.5, *, times=None, from_date=None):
     """Keep-mask dropping acquisitions whose post-coreg stable nmad is too high.
 
     Same gate the biweekly box plot applies
-    (:func:`cntp.postprocessing.absolute_accuracy_boxplots`): a failed
+    (:func:`tlapse4d.postprocessing.absolute_accuracy_boxplots`): a failed
     coregistration is excluded outright rather than being left in to be
     out-voted. ``max_nmad=None`` keeps everything.
 
@@ -985,7 +985,7 @@ def load_stable_nmad(output_dir, dates):
 
 
 
-# ── Plot primitives (→ promote to cntp.plot once validated) ────────────────
+# ── Plot primitives (→ promote to tlapse4d.plot once validated) ────────────────
 
 _SEASONAL_DOY_COLORS = ['#4A86E8', '#1FD0B8', '#E69138', '#A61C00', '#4A86E8']
 
@@ -1557,16 +1557,16 @@ def avalanche_cone_profiles(output_dir, profiles_shp, *, plot_dir=None,
 
 
 # ---------------------------------------------------------------------------
-# Part 4 -- relative / absolute accuracy -- PROMOTED to cntp
+# Part 4 -- relative / absolute accuracy -- PROMOTED to tlapse4d
 # ---------------------------------------------------------------------------
-# Drawing primitives -> cntp.plot; loaders/compute/orchestrators ->
-# cntp.postprocessing. Re-exported so notebook cells importing them from `tools`
+# Drawing primitives -> tlapse4d.plot; loaders/compute/orchestrators ->
+# tlapse4d.postprocessing. Re-exported so notebook cells importing them from `tools`
 # keep working against one source.
-from cntp.plot import (  # noqa: F401
+from tlapse4d.plot import (  # noqa: F401
     plot_maps_row, plot_relative_accuracy_boxplot, plot_absolute_accuracy_boxes,
     data_window,
 )
-from cntp.postprocessing import (  # noqa: F401
+from tlapse4d.postprocessing import (  # noqa: F401
     per_pixel_obs_count, per_pixel_nmad_map, load_stable_distance_stack,
     load_stable_grid_stack, stable_precision_arrays, pixel_relative_accuracy,
     absolute_accuracy_boxplots,

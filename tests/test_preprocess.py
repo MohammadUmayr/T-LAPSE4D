@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from cntp import preprocess
-from cntp.preprocess import _read_stamp, ensure_standardized, homogenize_images
+from tlapse4d import preprocess
+from tlapse4d.preprocess import _read_stamp, ensure_standardized, homogenize_images
 
 
 @pytest.fixture
@@ -264,7 +264,7 @@ class TestExifDatetime:
     """
 
     def test_exif_datetime(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from cntp.preprocess import _exif_datetime
+        from tlapse4d.preprocess import _exif_datetime
 
         class _Result:
             stdout = "2023:11:27 08:30:00\n"
@@ -274,7 +274,7 @@ class TestExifDatetime:
         assert _exif_datetime(tmp_path / "a.JPG") == "2023:11:27 08:30:00"
 
     def test_exif_datetime__empty_output_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from cntp.preprocess import _exif_datetime
+        from tlapse4d.preprocess import _exif_datetime
 
         class _Result:
             stdout = "   \n"
@@ -290,7 +290,7 @@ class TestCopyTask:
     """The per-file copy, which reports failures rather than raising so one bad file is survivable."""
 
     def test_copy_task(self, tmp_path: Path) -> None:
-        from cntp.preprocess import _copy_task
+        from tlapse4d.preprocess import _copy_task
 
         src = tmp_path / "src.JPG"
         src.write_bytes(b"jpeg-bytes")
@@ -302,7 +302,7 @@ class TestCopyTask:
         assert dst.read_bytes() == b"jpeg-bytes"
 
     def test_copy_task__failure_is_returned(self, tmp_path: Path) -> None:
-        from cntp.preprocess import _copy_task
+        from tlapse4d.preprocess import _copy_task
 
         # Copying into a directory that does not exist fails; the error comes back in the tuple.
         src = tmp_path / "src.JPG"
