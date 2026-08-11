@@ -20,7 +20,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import laspy
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import py4dgeo
+import rasterio
 
 from cntp.asp import (
     apply_coreg_to_cameras_ecef,
@@ -28,6 +33,7 @@ from cntp.asp import (
     extract_stable_reference,
     pc_align_p2p_sp2p,
 )
+from cntp.coreg import extract_stable_terrain, run_m3c2
 from cntp.io import apply_glacier_mask, load_las, save_las
 from cntp.metashape import (
     _utm_epsg,
@@ -36,6 +42,15 @@ from cntp.metashape import (
     run_multitemporal_ba,
     run_single_day_fixed_iop,
     update_registry,
+)
+from cntp.plot import plot_dod_histogram
+from cntp.raster import (
+    build_dem_and_ortho,
+    build_dem_and_ortho_p2d,
+    build_dod,
+    build_reference_dem_and_ortho,
+    m3c2_to_raster,
+    stable_m3c2_raster,
 )
 
 
@@ -68,7 +83,7 @@ def run_4dsfm_day(
     max_unaligned: int = 10,
     time_window: tuple[int, int] | None = None,
     exclude_cameras: list[dict] | None = None,
-) -> dict:
+) -> dict | None:
     """Run the full 4D SfM pipeline for *new_date*.
 
     Parameters
@@ -162,7 +177,8 @@ def run_4dsfm_day(
 
     # ── Discover images and derive UTM zone ──────────────────────────────
     reg_df   = pd.read_csv(registry_csv)
-    utm_epsg = _utm_epsg(reg_df["lon"].mean())
+    # Via to_numpy() so the mean is a plain scalar rather than a pandas object.
+    utm_epsg = _utm_epsg(float(reg_df["lon"].to_numpy().mean()))
 
     by_date = discover_images(tlcam_dir, time_window=time_window,
                               exclude_cameras=exclude_cameras)
@@ -318,7 +334,6 @@ def run_4dsfm_day(
 
         # Georeferenced raster of the after-coreg stable-terrain residual
         # (co-registration uncertainty) → single_day, for stacking over a season.
-        from cntp.raster import stable_m3c2_raster
         stable_m3c2_raster(
             ref_stable = eval_result["ref_stable"],
             distances  = eval_result["dist_after"],
@@ -375,12 +390,6 @@ def run_4dsfm_day(
     # Near-zero → ASP transform was correctly propagated into the rebuild.
     if run_validation and (overwrite or not validated_stable.exists()):
         print(f"\n[Step 6b] Validate rebuilt cloud — {new_date}")
-        import matplotlib.pyplot as plt
-        import numpy as np
-        import py4dgeo
-
-        from cntp.coreg import extract_stable_terrain, run_m3c2
-
         val_cloud = load_las(validated_laz, downsample_factor=tba_downsample)
         if glacier_mask is not None:
             val_cloud = apply_glacier_mask(val_cloud, glacier_mask)
@@ -492,7 +501,7 @@ def run_4dsfm_day_with_rasters(
     ref_cloud_downsample: float = 0.25,
     m3c2_ref_downsample: float = 0.25,
     slope_threshold: float = 60.0,
-    utm_epsg: int = None,
+    utm_epsg: int | None = None,
     overwrite_ref_dem: bool = False,
     overwrite_day_dem: bool = False,
     overwrite_dod: bool = False,
@@ -576,20 +585,6 @@ def run_4dsfm_day_with_rasters(
         comes from :func:`cntp.plot.plot_dod_histogram` and contains
         ``median``, ``mean``, ``std``, ``n`` over finite raster pixels.
     """
-    # Local imports — rasterio / laspy / cntp.raster / cntp.plot are not
-    # needed by callers of `run_4dsfm_day` alone, so we keep them off the
-    # module's hot import path.
-    import laspy
-    import rasterio
-
-    from cntp.plot import plot_dod_histogram
-    from cntp.raster import (
-        build_dem_and_ortho,
-        build_dem_and_ortho_p2d,
-        build_dod,
-        build_reference_dem_and_ortho,
-        m3c2_to_raster,
-    )
 
     output_dir   = Path(output_dir)
     ref_cloud    = Path(ref_cloud)
@@ -625,6 +620,13 @@ def run_4dsfm_day_with_rasters(
         time_window     = time_window,
         exclude_cameras = exclude_cameras,
     )
+    if sfm_result is None:
+        # run_4dsfm_day only returns None for stop_after_ba, which this function does not expose.
+        # Guarded anyway: the raster steps below index sfm_result and would otherwise fail with an
+        # opaque "NoneType is not subscriptable" three hundred lines later.
+        raise RuntimeError(
+            f"{new_date}: the SfM step returned no result, so the raster products cannot be built."
+        )
 
     # ── Resolve shared paths + CRS ───────────────────────────────────────
     day_dir       = output_dir / "output" / new_date
