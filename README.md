@@ -9,10 +9,10 @@
 
 **T**ime-lapse · **L**ong-term **A**utomated **P**hotogrammetric **S**urface **E**volution · **4D**
 
-The **4D** is three spatial dimensions plus time: the cameras never move, the surface does, and the
-record is the sequence of reconstructions through it. The Python package is **`tlapse4d`**.
+The **4D** is three spatial dimensions plus time. The Python package is **`tlapse4d`**.
 
-A library for generating and processing point clouds from the timelapse photogrammetry.
+A library for generating and processing point clouds from the timelapse photogrammetry along with
+surface change products.
 
 It turns fixed time-lapse photographs of a glacier into **co-registered 3-D point
 clouds, DEMs, orthoimages, and surface-change maps**, one date at a time. `tlapse4d`
