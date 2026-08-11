@@ -7,6 +7,11 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 
+**T**ime-lapse · **L**ong-term **A**utomated **P**hotogrammetric **S**urface **E**volution · **4D**
+
+The **4D** is three spatial dimensions plus time: the cameras never move, the surface does, and the
+record is the sequence of reconstructions through it. The Python package is **`tlapse4d`**.
+
 A library for generating and processing point clouds from the timelapse photogrammetry.
 
 It turns fixed time-lapse photographs of a glacier into **co-registered 3-D point
