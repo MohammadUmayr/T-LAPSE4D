@@ -146,7 +146,7 @@ itself *does* offer a native Windows wheel, but ASP does not — which is why th
 steps below reference the Linux wheel.
 
 ```bash
-git clone --branch v0.1.0 git@github.com:MohammadUmayr/T-LAPSE4D.git
+git clone git@github.com:MohammadUmayr/T-LAPSE4D.git
 cd ./T-LAPSE4D
 conda env create -f environment.yml
 conda activate tlapse4d
