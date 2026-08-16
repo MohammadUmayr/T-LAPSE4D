@@ -860,7 +860,12 @@ def run_batch(
     """
     import traceback
 
-    output_dir = Path(output_dir)
+    # Coerce once here, as run_4dsfm_day does, so the per-date call receives Paths.
+    tlcam_dir    = Path(tlcam_dir)
+    ref_cloud    = Path(ref_cloud)
+    glacier_mask = Path(glacier_mask)
+    registry_csv = Path(registry_csv)
+    output_dir   = Path(output_dir)
     summary_csv = (Path(summary_csv) if summary_csv is not None
                    else output_dir / "output" / "batch_summary.csv")
 
