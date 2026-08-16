@@ -350,10 +350,12 @@ class TestApplyTransformToLas:
         from tlapse4d.io import load_las
 
         # A similarity transform carries scale, but normals must stay unit length or every downstream
-        # slope calculation shifts.
+        # slope calculation shifts. The code divides R by cbrt(det(R)), so any scale exercises this
+        # equally; 1.0001 is the order pc_align actually solves, and unlike a 2x factor it does not
+        # fling the absolute UTM coordinates outside the LAS header's integer range.
         src = write_cloud_las("cloud.las")
         T = np.eye(4)
-        T[:3, :3] *= 2.0
+        T[:3, :3] *= 1.0001
         out = tmp_path / "scaled.las"
 
         _apply_transform_to_las(src, T, out)
@@ -367,14 +369,21 @@ class TestApplyTransformToLas:
         from tlapse4d.io import load_las
 
         src = write_cloud_las("cloud.las")
-        # 90 degrees about Z.
+        before = load_las(src)
+
+        # 90 degrees about Z, taken about the cloud's own centroid. pc_align solves its rotation
+        # about a reduction point near the data; rotating absolute UTM coordinates about the
+        # coordinate origin instead would fling the cloud thousands of kilometres away and out of
+        # the LAS header's integer range.
+        R = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        centroid = before[:, :3].mean(axis=0)
         T = np.eye(4)
-        T[:3, :3] = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        T[:3, :3] = R
+        T[:3, 3] = centroid - R @ centroid
         out = tmp_path / "rot.las"
 
         _apply_transform_to_las(src, T, out)
 
-        before = load_las(src)
         after = load_las(out)
         np.testing.assert_allclose(after[:, 6], -before[:, 7], atol=1e-5)
         np.testing.assert_allclose(after[:, 7], before[:, 6], atol=1e-5)

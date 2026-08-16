@@ -36,6 +36,7 @@ from tlapse4d.asp import (
 from tlapse4d.coreg import extract_stable_terrain, run_m3c2
 from tlapse4d.io import apply_glacier_mask, load_las, save_las
 from tlapse4d.metashape import (
+    _normalize_date,
     _utm_epsg,
     discover_images,
     rebuild_coreg_cloud,
@@ -755,3 +756,159 @@ def run_4dsfm_day_with_rasters(
         "stable_stats": stable_stats,
         "m3c2_stats":   m3c2_stats,
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-date orchestration: pick the dates, run them, summarise
+# ---------------------------------------------------------------------------
+
+def select_dates(
+    tlcam_dir: str | Path,
+    registry_csv: str | Path,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    time_window: tuple[int, int] | None = None,
+    exclude_cameras: list[dict] | None = None,
+) -> list[str]:
+    """Return the dates present in *tlcam_dir* that are worth processing.
+
+    A date qualifies when it has time-lapse imagery, is not already a reference
+    day in the registry, and falls inside the requested bounds. Reference days
+    are the baseline the multi-temporal bundle adjustment aligns *against*, so
+    reprocessing them as new dates would be circular.
+
+    Pass the same ``time_window`` / ``exclude_cameras`` the pipeline will run
+    with. Discovering dates without them can select a date whose only frames are
+    then filtered away, which fails later inside :func:`run_4dsfm_day` with
+    "No images found for date".
+
+    Parameters
+    ----------
+    tlcam_dir : str | Path
+        Directory of standardised time-lapse images (searched recursively).
+    registry_csv : str | Path
+        Reference registry CSV; its ``date`` column lists the reference days.
+    date_from, date_to : str, optional
+        Inclusive ``YYYY-MM-DD`` bounds. ISO dates compare chronologically as
+        plain strings, so no parsing is needed. ``None`` leaves that end open.
+    time_window, exclude_cameras :
+        Forwarded to :func:`tlapse4d.metashape.discover_images`.
+
+    Returns
+    -------
+    list[str]
+        Dates to process, ascending.
+    """
+    by_date = discover_images(tlcam_dir, time_window=time_window,
+                              exclude_cameras=exclude_cameras)
+    all_dates = sorted(by_date)
+
+    ref_dates = set(pd.read_csv(Path(registry_csv))["date"].map(_normalize_date))
+
+    dates = [
+        d for d in all_dates
+        if d not in ref_dates
+        and (date_from is None or d >= date_from)
+        and (date_to   is None or d <= date_to)
+    ]
+
+    print(f"Discovered {len(all_dates)} dated image set(s); "
+          f"{len(ref_dates)} reference day(s) excluded.")
+    print(f"{len(dates)} date(s) to process"
+          + (f": {dates[0]} … {dates[-1]}" if dates else "."))
+    return dates
+
+
+def run_batch(
+    dates: list[str],
+    tlcam_dir: str | Path,
+    ref_cloud: str | Path,
+    glacier_mask: str | Path,
+    registry_csv: str | Path,
+    output_dir: str | Path,
+    summary_csv: str | Path | None = None,
+    **params,
+) -> "pd.DataFrame":
+    """Run :func:`run_4dsfm_day_with_rasters` over *dates* and summarise the results.
+
+    A date that fails does not abort the batch: the error is recorded against
+    that date and the run continues, the same way
+    :func:`tlapse4d.preprocess.homogenize_images` records a skipped image rather
+    than abandoning the folder. A season's processing is hours long and one bad
+    date — a failed alignment gate, a cloudy day — should not cost the rest.
+
+    Parameters
+    ----------
+    dates : list[str]
+        Dates to process, ``YYYY-MM-DD``. See :func:`select_dates`.
+    tlcam_dir, ref_cloud, glacier_mask, registry_csv, output_dir :
+        See :func:`run_4dsfm_day`.
+    summary_csv : str | Path, optional
+        Where to write the summary table. Default
+        ``<output_dir>/output/batch_summary.csv``; pass ``None``-equivalent by
+        giving an explicit path elsewhere.
+    **params
+        Forwarded verbatim to :func:`run_4dsfm_day_with_rasters` — every SfM and
+        raster knob. Keeping them in one mapping lets a caller hold a named
+        parameter set per site.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per date: ``date`` plus the DoD, stable-terrain and M3C2 raster
+        median/std, or an ``error`` column for dates that failed.
+    """
+    import traceback
+
+    output_dir = Path(output_dir)
+    summary_csv = (Path(summary_csv) if summary_csv is not None
+                   else output_dir / "output" / "batch_summary.csv")
+
+    results: list[dict] = []
+    for d in dates:
+        print(f"\n{'#' * 70}\n#  {d}\n{'#' * 70}")
+        try:
+            results.append(run_4dsfm_day_with_rasters(
+                new_date     = d,
+                tlcam_dir    = tlcam_dir,
+                ref_cloud    = ref_cloud,
+                glacier_mask = glacier_mask,
+                registry_csv = registry_csv,
+                output_dir   = output_dir,
+                **params,
+            ))
+        except Exception as e:  # noqa: BLE001 — any failure → record and continue
+            print(f"\n  {d} failed: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            results.append({"date": d, "error": repr(e)})
+
+    rows = []
+    for r in results:
+        if "error" in r:
+            rows.append({"date": r["date"], "error": r["error"]})
+        else:
+            rows.append({
+                "date":          r["date"],
+                "dod_median":    r["dod_stats"]["median"],    "dod_std":    r["dod_stats"]["std"],
+                "stable_median": r["stable_stats"]["median"], "stable_std": r["stable_stats"]["std"],
+                "m3c2_median":   r["m3c2_stats"]["median"],   "m3c2_std":   r["m3c2_stats"]["std"],
+            })
+    df = pd.DataFrame(rows)
+
+    n_failed = sum("error" in r for r in results)
+    print(f"\n{'=' * 70}\n  Batch summary — {len(results)} date(s), {n_failed} failed\n{'=' * 70}")
+    for r in results:
+        if "error" in r:
+            print(f"  {r['date']} : ERROR — {r['error']}")
+        else:
+            print(
+                f"  {r['date']} : "
+                f"DoD med={r['dod_stats']['median']:+.2f} m  std={r['dod_stats']['std']:.2f}  |  "
+                f"stable med={r['stable_stats']['median']:+.2f} m  std={r['stable_stats']['std']:.2f}  |  "
+                f"M3C2 med={r['m3c2_stats']['median']:+.2f} m  std={r['m3c2_stats']['std']:.2f}"
+            )
+
+    summary_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(summary_csv, index=False)
+    print(f"\nSaved {summary_csv}")
+    return df

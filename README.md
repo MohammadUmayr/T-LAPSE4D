@@ -462,7 +462,7 @@ tunable flags below (defaults shown — most runs only set the required argument
 | `tlapse4d.io` | LAS/LAZ point-cloud I/O + glacier masking. |
 | `tlapse4d.raster` | DEM / orthoimage / DoD / M3C2 → GeoTIFF rasterisation. |
 | `tlapse4d.plot` | Diagnostic plots + histograms. |
-| `tlapse4d.pipeline_4dsfm` | Per-date orchestration — `run_4dsfm_day`, `run_4dsfm_day_with_rasters`. |
+| `tlapse4d.pipeline_4dsfm` | Per-date and multi-date orchestration — `run_4dsfm_day`, `run_4dsfm_day_with_rasters`, `select_dates`, `run_batch`. |
 
 ## Notebooks
 

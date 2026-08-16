@@ -391,9 +391,24 @@ def _apply_transform_to_las(las_path: Path, T: np.ndarray, out_path: Path,
                     else:
                         xyz_t = (R @ xyz.T).T + T[:3, 3]
 
-                    chunk.array["X"] = np.round((xyz_t[:, 0] - offsets[0]) / scales[0]).astype(np.int32)
-                    chunk.array["Y"] = np.round((xyz_t[:, 1] - offsets[1]) / scales[1]).astype(np.int32)
-                    chunk.array["Z"] = np.round((xyz_t[:, 2] - offsets[2]) / scales[2]).astype(np.int32)
+                    # LAS stores coordinates as int32 raw values around the header offset, so the
+                    # representable span is int32_max * scale. The output reuses the *input* header,
+                    # and a transform that moves points far enough would overflow that span --
+                    # astype(int32) on an out-of-range float is undefined and writes silently wrong
+                    # coordinates rather than failing. Check before casting.
+                    raw = np.round((xyz_t - offsets) / scales)
+                    if not np.all(np.abs(raw) <= np.iinfo(np.int32).max):
+                        span = np.iinfo(np.int32).max * scales
+                        raise ValueError(
+                            f"{Path(las_path).name}: the transformed cloud does not fit the LAS "
+                            f"header's integer grid. With scale {scales} the header spans "
+                            f"+/-{span} m about {offsets}; writing it would silently corrupt the "
+                            f"coordinates. Re-export the cloud with a coarser header scale."
+                        )
+
+                    chunk.array["X"] = raw[:, 0].astype(np.int32)
+                    chunk.array["Y"] = raw[:, 1].astype(np.int32)
+                    chunk.array["Z"] = raw[:, 2].astype(np.int32)
 
                     if normal_dtype is not None:
                         nx = np.asarray(chunk['normal x'], dtype=np.float64)
