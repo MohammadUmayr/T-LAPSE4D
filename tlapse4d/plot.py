@@ -829,7 +829,7 @@ def plot_absolute_accuracy_boxes(records, *, area_is_m2=True, bin_days=14,
         whi = max(whi, abs(bp["caps"][0].get_ydata()[0]),
                   abs(bp["caps"][1].get_ydata()[0]))
 
-    ax.set_ylabel("Elevation difference (m)")
+    ax.set_ylabel("M3C2 distance (m)")
     ax.set_xlabel("Date")
     ax.set_ylim(*(ylim if ylim is not None else (-1.1 * whi, 1.1 * whi)))
     ax.xaxis_date()
