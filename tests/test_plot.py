@@ -19,6 +19,7 @@ import pytest
 from conftest import GRID_SHAPE, GRID_TRANSFORM, make_cloud
 
 from tlapse4d.plot import (
+    _downslope_azim,
     _nice_scalebar_len,
     _plot_if_missing,
     _robust_vmax,
@@ -211,6 +212,30 @@ class TestStableTerrainPlots:
         plot_stable_terrain_rgb(make_cloud(n=200), tmp_path)
 
         assert (tmp_path / "stable_terrain_rgb.png").exists()
+
+    @pytest.mark.parametrize(
+        "grad_e, grad_n, expected",
+        [
+            (-1.0, 0.0, 0.0),      # ground drops towards +Easting: stand east, look west
+            (1.0, 0.0, 180.0),     # drops towards -Easting
+            (0.0, -1.0, 90.0),     # drops towards +Northing
+            (0.0, 1.0, -90.0),     # drops towards -Northing: the old hardcoded default
+        ],
+    )
+    def test_downslope_azim__faces_the_downhill_side(
+        self, grad_e: float, grad_n: float, expected: float
+    ) -> None:
+        e, n = np.meshgrid(np.linspace(0, 100, 20), np.linspace(0, 100, 20))
+        cloud = np.c_[e.ravel(), n.ravel(), (grad_e * e + grad_n * n).ravel()]
+
+        assert _downslope_azim(cloud) == pytest.approx(expected, abs=1e-6)
+
+    def test_downslope_azim__falls_back_when_flat(self) -> None:
+        e, n = np.meshgrid(np.linspace(0, 100, 10), np.linspace(0, 100, 10))
+        flat = np.c_[e.ravel(), n.ravel(), np.zeros(e.size)]
+
+        assert _downslope_azim(flat) == -90.0
+        assert _downslope_azim(np.empty((0, 3))) == -90.0
 
     def test_plot_ndwi_vs_intensity(self, tmp_path: Path) -> None:
         from tlapse4d.coreg import _NDWI_A, _NDWI_B

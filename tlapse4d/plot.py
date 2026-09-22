@@ -51,15 +51,54 @@ def plot_ndwi_vs_intensity(ndwi, grayscale_intensity, colors, line_a, line_b, ou
     plt.close(fig)
 
 
+def _downslope_azim(points: np.ndarray, *, fallback: float = -90.0,
+                    max_points: int = 200_000) -> float:
+    """Camera azimuth (deg) that turns the terrain's downhill face towards the viewer.
+
+    Fits a least-squares plane through the cloud. Its horizontal gradient points
+    uphill, so the opposite direction is where a viewer has to stand to see the
+    slope head-on. Matplotlib places the 3-D camera at the bearing given by
+    ``azim`` (degrees counter-clockwise from +Easting), so that bearing is the
+    azimuth to use directly.
+
+    Returns ``fallback`` for a cloud too small, too flat or too degenerate to fit.
+    """
+    xyz = np.asarray(points)[:, :3]
+    xyz = xyz[np.isfinite(xyz).all(axis=1)]
+    if len(xyz) < 3:
+        return fallback
+    if len(xyz) > max_points:                  # a plane fit needs no more points than this
+        xyz = xyz[:: int(np.ceil(len(xyz) / max_points))]
+
+    a = np.c_[xyz[:, :2] - xyz[:, :2].mean(axis=0), np.ones(len(xyz))]
+    try:
+        (grad_e, grad_n, _), *_ = np.linalg.lstsq(a, xyz[:, 2] - xyz[:, 2].mean(), rcond=None)
+    except np.linalg.LinAlgError:
+        return fallback
+    if not np.isfinite([grad_e, grad_n]).all() or np.hypot(grad_e, grad_n) < 1e-9:
+        return fallback                        # flat: no downhill direction to face
+
+    azim = float(np.degrees(np.arctan2(-grad_n, -grad_e)))
+    # Due west comes back as -180 whenever negating a zero gradient yields -0.0.
+    # Same direction as +180, but pin it so the value is reproducible.
+    return 180.0 if azim == -180.0 else azim
+
+
 def plot_stable_terrain_rgb(stable_points, output_dir, title='Stable terrain',
-                            filename="stable_terrain_rgb.png", elev=15, azim=-90):
+                            filename="stable_terrain_rgb.png", elev=15, azim=None):
     """3D scatter plot of stable terrain colored by RGB.
 
-    ``elev``/``azim`` set the 3-D view. The default (elev=15, azim=-90) is a
-    near-frontal view — looking along Northing so Easting × Elevation faces the
-    viewer — so the terrain always appears from the front regardless of site.
+    ``elev``/``azim`` set the 3-D view. ``azim=None`` (the default) derives the
+    azimuth per cloud from its mean downhill direction, via
+    :func:`_downslope_azim`, so the slope faces the viewer at every site. The
+    previous fixed ``azim=-90`` only ever meant "look due north": it suited
+    Changri West, but left Argentiere edge-on, the two facing roughly 84 and
+    38 degrees. Pass an explicit ``azim`` to override.
     """
     from matplotlib.ticker import MaxNLocator
+
+    if azim is None:
+        azim = _downslope_azim(stable_points)
 
     # Subtract a local origin so the Easting/Northing ticks are short offsets
     # (0..extent) instead of full 6-7 digit UTM values — the long northings
