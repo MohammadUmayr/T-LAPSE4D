@@ -975,6 +975,8 @@ def run_multitemporal_ba(
     match_downscale: int = 1,
     loc_acc_new: tuple = (0.5, 0.5, 0.5),
     rot_acc_new: tuple = (5.0, 5.0, 5.0),
+    generic_preselection: bool = True,
+    reference_preselection: bool = False,
     verbose: bool = False,
     max_unaligned: int = 10,
 ) -> tuple[Path, Path]:
@@ -1003,6 +1005,15 @@ def run_multitemporal_ba(
         Position accuracy (m) for new-day cameras.
     rot_acc_new : tuple
         Rotation accuracy (°) for new-day cameras.
+    generic_preselection : bool
+        Metashape image-pair preselection from low-resolution matches.
+        Default True. False makes ``matchPhotos`` exhaustive (every pair
+        tested at full ``match_downscale``) — slower but it can recover
+        reference↔new-day pairs the low-res pass discards.
+    reference_preselection : bool
+        Pair preselection from the camera reference positions. Default False:
+        the timelapse cameras sit on a handful of near-identical viewpoints,
+        so distance-based preselection has nothing useful to cut on.
     max_unaligned : int
         Cloud-cover gate (the pipeline's only alignment gate). When
         ``>= max_unaligned`` of the day's new-day cameras fail to align in this
@@ -1131,14 +1142,16 @@ def run_multitemporal_ba(
     print(f"  New-day cameras  (loose {loc_acc_new[0]} m / {rot_acc_new[0]}°) : {new_matched}/{n_new}", flush=True)
 
     # ── Bundle adjustment ─────────────────────────────────────────────────
-    print("  Matching photos ...", flush=True)
+    print(f"  Matching photos (generic_preselection="
+          f"{'on' if generic_preselection else 'off'}, reference_preselection="
+          f"{'on' if reference_preselection else 'off'}) ...", flush=True)
     with _quiet_metashape(verbose, native_log):
         chunk.matchPhotos(
             downscale=match_downscale,
             keypoint_limit=80000,
             tiepoint_limit=8000,
-            generic_preselection=True,
-            reference_preselection=False,
+            generic_preselection=generic_preselection,
+            reference_preselection=reference_preselection,
         )
 
     print("  Aligning cameras ...", flush=True)
@@ -1218,6 +1231,8 @@ def run_single_day_fixed_iop(
     filter_mode: str = "Mild",
     loc_acc: tuple = (0.5, 0.5, 0.5),
     rot_acc: tuple = (5.0, 5.0, 5.0),
+    generic_preselection: bool = True,
+    reference_preselection: bool = False,
     verbose: bool = False,
 ) -> tuple[Path, Path]:
     """Single-day re-run with IOP fixed and EOP loose.
@@ -1248,6 +1263,10 @@ def run_single_day_fixed_iop(
         Position accuracy (m) — same loose value as in multi-temporal BA.
     rot_acc : tuple
         Rotation accuracy (°) — same loose value as in multi-temporal BA.
+    generic_preselection, reference_preselection : bool
+        ``matchPhotos`` pair preselection for this single-day chunk. Same
+        meaning as in :func:`run_multitemporal_ba`; set independently of
+        Step 1 so a preselection experiment can be confined to one step.
 
     Returns
     -------
@@ -1313,14 +1332,16 @@ def run_single_day_fixed_iop(
     print(f"  EOP priors (loose {loc_acc[0]} m / {rot_acc[0]}°) : {matched}/{len(chunk.cameras)}", flush=True)
 
     # ── Bundle adjustment ─────────────────────────────────────────────────
-    print("  Matching photos ...", flush=True)
+    print(f"  Matching photos (generic_preselection="
+          f"{'on' if generic_preselection else 'off'}, reference_preselection="
+          f"{'on' if reference_preselection else 'off'}) ...", flush=True)
     with _quiet_metashape(verbose, native_log):
         chunk.matchPhotos(
             downscale=match_downscale,
             keypoint_limit=80000,
             tiepoint_limit=8000,
-            generic_preselection=True,
-            reference_preselection=False,
+            generic_preselection=generic_preselection,
+            reference_preselection=reference_preselection,
         )
 
     print("  Aligning cameras ...", flush=True)

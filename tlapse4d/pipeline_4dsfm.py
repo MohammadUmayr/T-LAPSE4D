@@ -76,6 +76,10 @@ def run_4dsfm_day(
     sp2p_outlier_ratio: float = 0.75,
     m_sp2p_outlier_ratio: float = 0.75,
     use_ecef: bool = True,
+    step1_generic_preselection: bool = True,
+    step1_reference_preselection: bool = False,
+    step2_generic_preselection: bool = True,
+    step2_reference_preselection: bool = False,
     overwrite: bool = False,
     verbose: bool = False,
     stop_after_ba: bool = False,
@@ -114,6 +118,17 @@ def run_4dsfm_day(
         Max ICP correspondence distance [m] for stages 1, 2, 3.
     use_ecef : bool
         Run ICP in ECEF space (recommended — avoids flat-Cartesian distortion).
+    step1_generic_preselection, step1_reference_preselection : bool
+        ``matchPhotos`` pair preselection for Step 1 (multi-temporal BA).
+        Defaults ``True`` / ``False`` reproduce the published behaviour.
+        ``step1_generic_preselection=False`` makes Step 1 matching exhaustive:
+        every image pair is tested at full ``match_downscale`` instead of
+        being pre-filtered on low-resolution matches. Much slower, but it can
+        recover reference↔new-day pairs the low-res pass throws away — the
+        usual reason to turn it off.
+    step2_generic_preselection, step2_reference_preselection : bool
+        Same two knobs for Step 2 (single-day fixed-IOP reconstruction), set
+        independently so a preselection experiment can be confined to Step 1.
     overwrite : bool
         When False (default) each step is skipped if its key output already
         exists; useful for resuming after a crash.
@@ -244,6 +259,8 @@ def run_4dsfm_day(
             match_downscale        = match_downscale,
             loc_acc_new            = loc_acc_new,
             rot_acc_new            = rot_acc_new,
+            generic_preselection   = step1_generic_preselection,
+            reference_preselection = step1_reference_preselection,
             verbose                = verbose,
             max_unaligned          = max_unaligned,
         )
@@ -271,6 +288,8 @@ def run_4dsfm_day(
             filter_mode     = filter_mode,
             loc_acc         = loc_acc_new,
             rot_acc         = rot_acc_new,
+            generic_preselection   = step2_generic_preselection,
+            reference_preselection = step2_reference_preselection,
             verbose         = verbose,
         )
 
@@ -489,6 +508,10 @@ def run_4dsfm_day_with_rasters(
     sp2p_outlier_ratio: float = 0.75,
     m_sp2p_outlier_ratio: float = 0.75,
     use_ecef: bool = True,
+    step1_generic_preselection: bool = True,
+    step1_reference_preselection: bool = False,
+    step2_generic_preselection: bool = True,
+    step2_reference_preselection: bool = False,
     overwrite: bool = False,
     verbose: bool = False,
     add_to_registry: bool = True,
@@ -542,6 +565,8 @@ def run_4dsfm_day_with_rasters(
         See :func:`run_4dsfm_day`.
     match_downscale, depth_downscale, filter_mode, loc_acc_new, rot_acc_new, ref_downsample,
     tba_downsample, p2p_max_disp, sp2p_max_disp, m_sp2p_max_disp, use_ecef,
+    step1_generic_preselection, step1_reference_preselection,
+    step2_generic_preselection, step2_reference_preselection,
     overwrite, verbose, add_to_registry, max_unaligned, time_window, exclude_cameras :
         Forwarded to :func:`run_4dsfm_day`. ``time_window=(start_hour,
         end_hour)`` keeps only daytime frames (drops night / motion-triggered
@@ -613,6 +638,10 @@ def run_4dsfm_day_with_rasters(
         sp2p_outlier_ratio   = sp2p_outlier_ratio,
         m_sp2p_outlier_ratio = m_sp2p_outlier_ratio,
         use_ecef             = use_ecef,
+        step1_generic_preselection   = step1_generic_preselection,
+        step1_reference_preselection = step1_reference_preselection,
+        step2_generic_preselection   = step2_generic_preselection,
+        step2_reference_preselection = step2_reference_preselection,
         overwrite       = overwrite,
         verbose         = verbose,
         add_to_registry = add_to_registry,
