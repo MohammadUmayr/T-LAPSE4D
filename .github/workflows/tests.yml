@@ -46,14 +46,17 @@ jobs:
       - name: Install tlapse4d
         run: pip install -e .
 
-      # The Metashape Python module is proprietary and cannot be installed on a runner. The library
-      # falls back to `Metashape = None`, so this must still succeed. If it ever stops doing so, the
-      # package has grown a hard dependency on a licensed module.
-      - name: Check import works without Metashape
-        run: python -c "import tlapse4d; print(tlapse4d.__file__)"
-
       - name: Print conda environment (for debugging)
         run: conda info && conda list
+
+      # The Metashape Python module is proprietary and cannot be installed on a runner. The library
+      # falls back to `Metashape = None`, so this must still succeed. If it ever stops doing so, the
+      # package has grown a hard dependency on a licensed module. Runs under faulthandler so a
+      # native crash names the module it died in rather than just exiting 139.
+      - name: Check import works without Metashape
+        run: |
+          python -VV
+          python -X faulthandler -c "import tlapse4d; print(tlapse4d.__file__)"
 
       - name: Test with pytest
         run: coverage run -m pytest -ra --durations=10
