@@ -5,8 +5,9 @@ channels:
 dependencies:
   # Pinned so a fresh `conda env create` and CI resolve the same interpreter. Without it conda picks
   # whatever is newest at the time, and two machines built weeks apart can end up on different
-  # Python versions with different resolved dependencies.
-  - python=3.14
+  # Python versions with different resolved dependencies. The build-string suffix also excludes the
+  # free-threaded (no-GIL) `_cp314t` builds, on which `import tlapse4d` segfaults in lazrs.
+  - python=3.14.*=*_cp314
 
   - xdem
   - numba
